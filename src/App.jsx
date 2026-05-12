@@ -4495,6 +4495,7 @@ export default function App() {
   const [sbOpen,setSbOpen]=useState(false);
   const [notifOpen,setNotifOpen]=useState(false);
   const [toast,setToast]=useState(null);
+  const [confirmReset,setConfirmReset]=useState(false);
 
   const [globalDollarRate, setGlobalDollarRate] = useState("");
 
@@ -4629,7 +4630,7 @@ export default function App() {
             </div>
             <button className="lobtn" onClick={()=>{setUser(null);setSbOpen(false);}}><Icon n="out" s={14}/> Sair</button>
             {user.role==="owner"&&(
-              <button onClick={()=>{ localStorage.removeItem(DB_KEY); setDb({...SEED}); setUser(null); setSbOpen(false); toast("Dados resetados!","ok"); }} style={{width:"100%",marginTop:8,display:"flex",alignItems:"center",gap:8,padding:"7px 12px",background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.15)",borderRadius:8,color:"rgba(252,165,165,.55)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
+              <button onClick={()=>setConfirmReset(true)} style={{width:"100%",marginTop:8,display:"flex",alignItems:"center",gap:8,padding:"7px 12px",background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.15)",borderRadius:8,color:"rgba(252,165,165,.55)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
                 🔄 Resetar dados de teste
               </button>
             )}
@@ -4639,6 +4640,33 @@ export default function App() {
       </div>
       {notifOpen&&<Notifs currentUser={user} db={db} setDb={setDb} onClose={()=>setNotifOpen(false)}/>}
       <Toast t={toast} onClose={()=>setToast(null)}/>
+      {confirmReset&&(
+        <div className="mo" onClick={()=>setConfirmReset(false)}>
+          <div className="md" style={{maxWidth:420}} onClick={e=>e.stopPropagation()}>
+            <div className="mhead">
+              <div className="mtit" style={{color:"var(--err)"}}>🔄 Resetar dados</div>
+              <button className="btn bo bic bsm" onClick={()=>setConfirmReset(false)}><Icon n="x" s={16}/></button>
+            </div>
+            <div className="mbody">
+              <p style={{fontSize:14,lineHeight:1.6,marginBottom:12}}>Tem certeza que deseja apagar <strong>todos os dados</strong> e voltar ao estado inicial?</p>
+              <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#92400e"}}>
+                ⚠️ Esta ação não pode ser desfeita. Todos os blocos, vendas e cadastros serão removidos.
+              </div>
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={()=>setConfirmReset(false)}>Cancelar</button>
+              <button className="btn br" onClick={()=>{
+                try { localStorage.removeItem(DB_KEY); } catch(e) {}
+                setDb({...SEED});
+                setUser(null);
+                setSbOpen(false);
+                setConfirmReset(false);
+                toast("Dados resetados!","ok");
+              }}>Confirmar Reset</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div></>
   );
 }
