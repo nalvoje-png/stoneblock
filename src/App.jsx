@@ -4657,11 +4657,10 @@ export default function App() {
               <button className="btn bo" onClick={()=>setConfirmReset(false)}>Cancelar</button>
               <button className="btn br" onClick={()=>{
                 try { localStorage.removeItem(DB_KEY); } catch(e) {}
-                setDb({...SEED});
-                setUser(null);
-                setSbOpen(false);
+                localStorage.clear();
+                sessionStorage.clear();
                 setConfirmReset(false);
-                toast("Dados resetados!","ok");
+                window.location.reload();
               }}>Confirmar Reset</button>
             </div>
           </div>
