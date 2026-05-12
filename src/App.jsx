@@ -2,77 +2,23 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── SEED ────────────────────────────────────
 const SEED = {
-  quarries: [
-    { id:1, name:"Pedreira VMC",      location:"Serra do Cipó, MG",            materials:["Granito Verde Ubatuba","Granito Preto São Gabriel","Granito Amarelo Ornamental"] },
-    { id:2, name:"Pedreira Espírito", location:"Cachoeiro de Itapemirim, ES",  materials:["Mármore Branco Espírito Santo","Quartzito Taj Mahal","Mármore Bege Bahia"] },
-    { id:3, name:"Pedreira Alvorada", location:"Nova Venécia, ES",             materials:["Granito Rosa Porriño","Travertino Romano","Quartzito Persa"] },
-  ],
+  quarries:        [],
   users: [
-    { id:1, name:"Carlos Mendonça",  email:"dono@stoneblock.com",    password:"123", role:"owner",   quarry_id:null, avatar:"CM", phone:"+55 27 99888-0001" },
-    { id:2, name:"João Ferreira",    email:"joao@stoneblock.com",    password:"123", role:"foreman", quarry_id:1,    avatar:"JF", phone:"+55 31 99777-0002" },
-    { id:3, name:"Ana Paula",        email:"ana@stoneblock.com",     password:"123", role:"seller",  quarry_id:null, avatar:"AP", phone:"+55 27 99666-0003" },
-    { id:4, name:"Marble World USA", email:"marble@worldusa.com",    password:"123", role:"client",  quarry_id:null, avatar:"MW" },
-    { id:5, name:"Stone Italia Srl", email:"stone@italia.it",        password:"123", role:"client",  quarry_id:null, avatar:"SI" },
-    { id:6, name:"Ricardo Vendas",   email:"ricardo@stoneblock.com", password:"123", role:"seller",  quarry_id:null, avatar:"RV", phone:"+55 27 99555-0006", commission:true, commission_pct:5 },
+    { id:1, name:"Dono",        email:"dono@stoneblock.com",  password:"123", role:"owner",   quarry_id:null, avatar:"DO", phone:"" },
+    { id:2, name:"Encarregado", email:"enc@stoneblock.com",   password:"123", role:"foreman", quarry_id:null, avatar:"EN", phone:"" },
+    { id:3, name:"Vendedor",    email:"vend@stoneblock.com",  password:"123", role:"seller",  quarry_id:null, avatar:"VE", phone:"" },
+    { id:4, name:"Cliente",     email:"cliente@stoneblock.com",password:"123",role:"client",  quarry_id:null, avatar:"CL" },
   ],
-  blocks: [
-    // ── Pedreira VMC ──
-    { id:1,  code:"VMC-001", quarry_id:1, material:"Granito Verde Ubatuba",         classification:"A+", gross_l:3.20, gross_h:1.90, gross_w:1.45, net_l:3.10, net_h:1.85, net_w:1.40, gross_volume:8.816, net_volume:8.029, currency:"USD", price_m3:1800, total_value:14452.20, status:"available", photos:["https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=800&q=80","https://images.unsplash.com/photo-1564419320461-6870880221ad?w=800&q=80"], notes:"Peça excepcional com veios únicos. Sem fissuras visíveis.", created_by:2, created_at:"2025-01-08T08:00:00Z" },
-    { id:2,  code:"VMC-002", quarry_id:1, material:"Granito Verde Ubatuba",         classification:"A",  gross_l:2.85, gross_h:1.75, gross_w:1.30, net_l:2.75, net_h:1.68, net_w:1.24, gross_volume:6.483, net_volume:5.732, currency:"USD", price_m3:1700, total_value:9744.40,  status:"available", photos:["https://images.unsplash.com/photo-1564419320461-6870880221ad?w=800&q=80"], notes:"Coloração intensa e homogênea.", created_by:2, created_at:"2025-01-10T09:30:00Z" },
-    { id:3,  code:"VMC-003", quarry_id:1, material:"Granito Preto São Gabriel",     classification:"A+", gross_l:3.10, gross_h:1.95, gross_w:1.50, net_l:3.00, net_h:1.88, net_w:1.44, gross_volume:9.068, net_volume:8.122, currency:"USD", price_m3:2200, total_value:17868.40, status:"reserved", reserved_for:1, photos:["https://images.unsplash.com/photo-1551376347-075b0121a65b?w=800&q=80","https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=800&q=80"], notes:"Preto absoluto, máxima qualidade de exportação.", created_by:2, created_at:"2025-01-12T10:00:00Z" },
-    { id:4,  code:"VMC-004", quarry_id:1, material:"Granito Preto São Gabriel",     classification:"A",  gross_l:2.70, gross_h:1.60, gross_w:1.25, net_l:2.60, net_h:1.54, net_w:1.20, gross_volume:5.400, net_volume:4.805, currency:"USD", price_m3:2000, total_value:9610.00,  status:"available", photos:["https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=800&q=80"], notes:"Boa peça, apta para exportação.", created_by:2, created_at:"2025-01-15T11:00:00Z" },
-    { id:5,  code:"VMC-005", quarry_id:1, material:"Granito Amarelo Ornamental",    classification:"B",  gross_l:2.50, gross_h:1.40, gross_w:1.10, net_l:2.40, net_h:1.34, net_w:1.05, gross_volume:3.850, net_volume:3.376, currency:"BRL", price_m3:620,  total_value:2093.12,  status:"available", photos:["https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=800&q=80"], notes:"Tons quentes e dourados.", created_by:2, created_at:"2025-02-03T08:00:00Z" },
-    // ── Pedreira Espírito ──
-    { id:6,  code:"ESP-001", quarry_id:2, material:"Mármore Branco Espírito Santo", classification:"A+", gross_l:2.80, gross_h:1.55, gross_w:1.20, net_l:2.70, net_h:1.50, net_w:1.15, gross_volume:5.198, net_volume:4.658, currency:"USD", price_m3:3200, total_value:14905.60, status:"available", photos:["https://images.unsplash.com/photo-1542621334-a254cf47733d?w=800&q=80","https://images.unsplash.com/photo-1568383253400-81371f6f5e38?w=800&q=80"], notes:"Brancura excepcional. Veio sutil cinza.", created_by:2, created_at:"2025-01-20T09:00:00Z" },
-    { id:7,  code:"ESP-002", quarry_id:2, material:"Mármore Branco Espírito Santo", classification:"A",  gross_l:2.60, gross_h:1.45, gross_w:1.15, net_l:2.50, net_h:1.40, net_w:1.10, gross_volume:4.334, net_volume:3.850, currency:"USD", price_m3:3000, total_value:11550.00, status:"available", photos:["https://images.unsplash.com/photo-1568383253400-81371f6f5e38?w=800&q=80"], notes:"Alta demanda no mercado italiano.", created_by:2, created_at:"2025-01-22T10:30:00Z" },
-    { id:8,  code:"ESP-003", quarry_id:2, material:"Quartzito Taj Mahal",           classification:"A+", gross_l:3.00, gross_h:1.80, gross_w:1.35, net_l:2.90, net_h:1.74, net_w:1.30, gross_volume:7.290, net_volume:6.557, currency:"USD", price_m3:2800, total_value:18359.60, status:"available", photos:["https://images.unsplash.com/photo-1618317640648-65fef84c9e9b?w=800&q=80","https://images.unsplash.com/photo-1570129477492-45c003edd2be?w=800&q=80"], notes:"Peça premium. Raro e muito procurado.", created_by:2, created_at:"2025-02-01T08:00:00Z" },
-    { id:9,  code:"ESP-004", quarry_id:2, material:"Quartzito Taj Mahal",           classification:"A",  gross_l:2.75, gross_h:1.65, gross_w:1.25, net_l:2.65, net_h:1.58, net_w:1.20, gross_volume:5.661, net_volume:5.027, currency:"USD", price_m3:2600, total_value:13070.20, status:"available", photos:["https://images.unsplash.com/photo-1570129477492-45c003edd2be?w=800&q=80"], notes:"Coloração dourada equilibrada.", created_by:2, created_at:"2025-02-05T09:00:00Z" },
-    { id:10, sys_code:"SB-2025-D3E4", code:"ESP-005", quarry_id:2, material:"Mármore Bege Bahia",            classification:"B",  gross_l:2.40, gross_h:1.35, gross_w:1.10, net_l:2.30, net_h:1.30, net_w:1.05, gross_volume:3.564, net_volume:3.140, currency:"BRL", price_m3:1100, total_value:3454.00,  status:"available", photos:["https://images.unsplash.com/photo-1600607686527-6fb886090705?w=800&q=80"], notes:"Material clássico de boa aceitação.", created_by:2, created_at:"2025-02-10T08:00:00Z" },
-    // ── Pedreira Alvorada ──
-    { id:11, sys_code:"SB-2025-G6H7", code:"ALV-001", quarry_id:3, material:"Granito Rosa Porriño",          classification:"A",  gross_l:2.90, gross_h:1.70, gross_w:1.30, net_l:2.80, net_h:1.64, net_w:1.25, gross_volume:6.409, net_volume:5.740, currency:"USD", price_m3:1500, total_value:8610.00,  status:"available", photos:["https://images.unsplash.com/photo-1567157577867-05ccb1388e66?w=800&q=80"], notes:"Rosa uniforme. Muito usado em projetos de luxo.", created_by:2, created_at:"2025-02-12T09:00:00Z" },
-    { id:12, sys_code:"SB-2025-K9L2", code:"ALV-002", quarry_id:3, material:"Travertino Romano",             classification:"A+", gross_l:3.10, gross_h:1.85, gross_w:1.40, net_l:3.00, net_h:1.78, net_w:1.35, gross_volume:8.029, net_volume:7.209, currency:"USD", price_m3:1900, total_value:13697.10, status:"available", photos:["https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=800&q=80","https://images.unsplash.com/photo-1571902943202-507ec2618e8f?w=800&q=80"], notes:"Travertino claro, poucos poros. Excelente para fachadas.", created_by:2, created_at:"2025-02-15T10:00:00Z" },
-    { id:13, sys_code:"SB-2025-N4P5", code:"ALV-003", quarry_id:3, material:"Quartzito Persa",               classification:"A",  gross_l:2.65, gross_h:1.55, gross_w:1.20, net_l:2.55, net_h:1.50, net_w:1.15, gross_volume:4.929, net_volume:4.401, currency:"USD", price_m3:2400, total_value:10562.40, status:"available", photos:["https://images.unsplash.com/photo-1618317640648-65fef84c9e9b?w=800&q=80"], notes:"Veios dramáticos em cinza e ouro.", created_by:2, created_at:"2025-03-01T08:00:00Z" },
-    // ── Vendidos ──
-    { id:14, sys_code:"SB-2024-R7S8", code:"VMC-006", quarry_id:1, material:"Granito Verde Ubatuba",         classification:"A",  gross_l:2.95, gross_h:1.80, gross_w:1.35, net_l:2.85, net_h:1.74, net_w:1.30, gross_volume:7.181, net_volume:6.450, currency:"USD", price_m3:1750, total_value:11287.50, status:"sold", photos:["https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=800&q=80"], notes:"Vendido para mercado europeu.", created_by:2, created_at:"2024-12-01T09:00:00Z" },
-    { id:15, sys_code:"SB-2024-U3V4", code:"ESP-006", quarry_id:2, material:"Quartzito Taj Mahal",           classification:"A+", gross_l:3.20, gross_h:1.90, gross_w:1.45, net_l:3.10, net_h:1.84, net_w:1.40, gross_volume:8.816, net_volume:7.990, currency:"USD", price_m3:2900, total_value:23171.00, status:"sold", photos:["https://images.unsplash.com/photo-1618317640648-65fef84c9e9b?w=800&q=80"], notes:"Exportado para EUA.", created_by:2, created_at:"2024-12-15T10:00:00Z" },
-  ],
-  clients: [
-    { id:1, name:"Marble World USA",    country:"Estados Unidos",  phone:"+1 212 555-0191",  email:"marble@worldusa.com",    doc:"EIN 12-3456789",       notes:"Principal comprador americano.", user_id:4 },
-    { id:2, name:"Stone Italia Srl",    country:"Itália",          phone:"+39 055 555-0202", email:"acquisti@stoneitalia.it", doc:"P.IVA IT12345678901",  notes:"Importador italiano. Prefere mármore e travertino.", user_id:5 },
-    { id:3, name:"Construtora Noronha", country:"Brasil",          phone:"+55 21 99888-0303",email:"compras@noronha.com.br",  doc:"45.678.901/0001-23",   notes:"Obras de alto padrão no Rio." },
-    { id:4, name:"Al Faris Trading",    country:"Emirados Árabes", phone:"+971 50 555-0404", email:"stone@alfaris.ae",        doc:"TRN 100-234-567",      notes:"Mercado árabe. Interesse em granito preto." },
-  ],
-  payment_methods: [
-    { id:1, name:"Transferência Bancária (BRL)", details:"Banco do Brasil — Ag: 1234 — CC: 56789-0" },
-    { id:2, name:"Wire Transfer (USD)",          details:"Bradesco NY | SWIFT: BRASBRRJBHE | Account: 123456789" },
-    { id:3, name:"Letter of Credit (L/C)",       details:"Carta de crédito irrevogável. Prazo: 30 dias." },
-    { id:4, name:"30/60/90 dias (BRL)",          details:"Parcelamento em 3x com emissão de duplicatas." },
-  ],
-  block_releases: [
-    { id:1, block_id:1,  client_id:1, liberado_por:1, data_liberacao:"2025-01-08T10:00:00Z" },
-    { id:2, block_id:2,  client_id:1, liberado_por:1, data_liberacao:"2025-01-10T10:00:00Z" },
-    { id:3, block_id:3,  client_id:1, liberado_por:1, data_liberacao:"2025-01-12T10:00:00Z" },
-    { id:4, block_id:6,  client_id:1, liberado_por:1, data_liberacao:"2025-01-20T10:00:00Z" },
-    { id:5, block_id:8,  client_id:1, liberado_por:1, data_liberacao:"2025-02-01T10:00:00Z" },
-    { id:6, block_id:9,  client_id:1, liberado_por:1, data_liberacao:"2025-02-05T10:00:00Z" },
-    { id:7, block_id:6,  client_id:2, liberado_por:1, data_liberacao:"2025-01-21T10:00:00Z" },
-    { id:8, block_id:7,  client_id:2, liberado_por:1, data_liberacao:"2025-01-22T10:00:00Z" },
-    { id:9, block_id:12, client_id:2, liberado_por:1, data_liberacao:"2025-02-15T10:00:00Z" },
-  ],
-  favorites:      [],
-  access_history: [],
-  sales: [
-    { id:1, block_ids:[14], seller_id:3, client_id:2, payment_method_id:2, dollar_rate:4.97, total_brl:56099.48, total_usd:11287.50, obs:"Exportação Europa — Stone Italia Srl", created_at:"2024-12-20T14:00:00Z" },
-    { id:2, block_ids:[15], seller_id:3, client_id:1, payment_method_id:2, dollar_rate:4.95, total_brl:114696.45, total_usd:23171.00, obs:"Exportação EUA — Marble World USA", created_at:"2025-01-05T11:00:00Z" },
-  ],
-  orders: [],
-  notifications: [
-    { id:1, user_id:1, message:"Bem-vindo ao Stone Block! Sistema pronto para uso.", read:false, created_at:"2025-01-08T08:00:00Z", type:"info" },
-    { id:2, user_id:1, message:"Venda concluída: VMC-006 — US$ 11.287,50", read:true, created_at:"2024-12-20T14:01:00Z", type:"sale" },
-    { id:3, user_id:1, message:"Venda concluída: ESP-006 — US$ 23.171,00", read:true, created_at:"2025-01-05T11:01:00Z", type:"sale" },
-  ],
+  blocks:          [],
+  clients:         [{ id:1, name:"Cliente Demo", country:"Brasil", phone:"", email:"cliente@stoneblock.com", doc:"", notes:"", user_id:4 }],
+  payment_methods: [],
+  block_releases:  [],
+  favorites:       [],
+  access_history:  [],
+  sales:           [],
+  orders:          [],
+  notifications:   [],
 };
-
 // ─── PERSISTENCE ─────────────────────────────
 const DB_KEY = "stoneblock_db_v1";
 
