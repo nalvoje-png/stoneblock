@@ -1080,7 +1080,7 @@ function EditBlockModal({b, onClose, onSave}) {
 }
 
 // ─── REGISTER BLOCK ──────────────────────────
-function Reg({currentUser,quarries,db,setDb,toast}) {
+function Reg({currentUser,quarries,db,setDb,toast,actions}) {
   const defaultForm = {code:"",quarry_id:currentUser.quarry_id?String(currentUser.quarry_id):"",material:"",classification:"A",gross_l:"",gross_h:"",gross_w:"",net_l:"",net_h:"",net_w:"",currency:"BRL",price_m3:"",notes:"",photos:[],prod_date:new Date().toISOString().slice(0,10)};
   const [f,setF]=useState(defaultForm);
   const fRef=useRef(f); const fileRef=useRef();
@@ -1098,8 +1098,10 @@ function Reg({currentUser,quarries,db,setDb,toast}) {
     const N=cur.net_l&&cur.net_h&&cur.net_w?calcV(cur.net_l,cur.net_h,cur.net_w):0;
     const P=parseFloat(cur.price_m3)||0;
     const snap={code:cur.code.trim(),quarry_id:parseInt(cur.quarry_id,10),material:cur.material,classification:cur.classification,gross_l:parseFloat(cur.gross_l)||0,gross_h:parseFloat(cur.gross_h)||0,gross_w:parseFloat(cur.gross_w)||0,net_l:parseFloat(cur.net_l)||0,net_h:parseFloat(cur.net_h)||0,net_w:parseFloat(cur.net_w)||0,gross_volume:G,net_volume:N,currency:cur.currency,price_m3:P,total_value:parseFloat((N*P).toFixed(2)),status:"available",photos:[...cur.photos],notes:cur.notes,created_by:currentUser.id,created_at:cur.prod_date?new Date(cur.prod_date+"T12:00:00").toISOString():new Date().toISOString()};
-    setDb(prev=>{const sysCode=genBlockId(prev.blocks);return({...prev,blocks:[...prev.blocks,{id:nid(prev.blocks),sys_code:sysCode,...snap}],notifications:[...prev.notifications,{id:nid(prev.notifications),user_id:1,message:`Novo bloco: ${snap.code} — ${snap.material}`,read:false,created_at:new Date().toISOString(),type:"new_block"}]})});
-    setF({...defaultForm});toast("Bloco cadastrado com sucesso!","ok");
+    actions.createBlock(snap).then(()=>{
+      setF({...defaultForm});
+      toast("Bloco cadastrado com sucesso!","ok");
+    }).catch(e=>{ toast("Erro ao salvar bloco.","err"); console.error(e); });
   };
 
   const qOpts=quarries; // todos os roles veem todas as pedreiras
@@ -1970,7 +1972,7 @@ function BList({currentUser, quarries, db, setDb, toast, title, sub, bFilter, gl
 }
 
 // ─── QUARRIES PAGE ───────────────────────────
-function QuarriesPage({db, setDb, toast}) {
+function QuarriesPage({db, setDb, toast, actions}) {
   const emptyForm = { name:"", location:"", materials:[] };
   const [form,    setForm]    = useState(emptyForm);
   const [editId,  setEditId]  = useState(null);
@@ -1991,25 +1993,28 @@ function QuarriesPage({db, setDb, toast}) {
   };
   const removeMaterial = m => sv("materials", form.materials.filter(x=>x!==m));
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim()) { toast("Nome da pedreira obrigatório.","err"); return; }
     if (form.materials.length === 0) { toast("Adicione ao menos um material.","err"); return; }
-    if (editId) {
-      setDb(prev=>({...prev, quarries: prev.quarries.map(q=>q.id===editId?{...q,...form}:q)}));
-      toast("Pedreira atualizada!","ok");
-    } else {
-      setDb(prev=>({...prev, quarries:[...prev.quarries,{id:nid(prev.quarries),...form}]}));
-      toast("Pedreira cadastrada!","ok");
-    }
-    setShowForm(false);
+    try {
+      if (editId) {
+        await actions.updateQuarry(editId, form);
+        toast("Pedreira atualizada!","ok");
+      } else {
+        await actions.createQuarry(form);
+        toast("Pedreira cadastrada!","ok");
+      }
+      setShowForm(false);
+    } catch(e) { toast("Erro ao salvar. Tente novamente.","err"); console.error(e); }
   };
 
-  const del = q => {
+  const del = async q => {
     const inUse = db.blocks.some(b=>b.quarry_id===q.id);
     if (inUse) { toast("Não é possível excluir: existem blocos vinculados a esta pedreira.","err"); return; }
-    if (!window.confirm(`Excluir a pedreira "${q.name}"?`)) return;
-    setDb(prev=>({...prev, quarries:prev.quarries.filter(x=>x.id!==q.id)}));
-    toast("Pedreira excluída.","ok");
+    try {
+      await actions.deleteQuarry(q.id);
+      toast("Pedreira excluída.","ok");
+    } catch(e) { toast("Erro ao excluir.","err"); console.error(e); }
   };
 
   const MATERIAL_SUGGESTIONS = [
@@ -2171,7 +2176,7 @@ function QuarriesPage({db, setDb, toast}) {
 
 
 // ─── CLIENT REGISTER ─────────────────────────
-function ClientsPage({db, setDb, toast, currentUser}) {
+function ClientsPage({db, setDb, toast, currentUser, actions}) {
   const [form,setForm]=useState({name:"",country:"Brasil",phone:"",email:"",doc:"",notes:""});
   const [editId,setEditId]=useState(null);
   const [showForm,setShowForm]=useState(false);
@@ -2181,11 +2186,16 @@ function ClientsPage({db, setDb, toast, currentUser}) {
   const openEdit=c=>{setForm({name:c.name,country:c.country,phone:c.phone||"",email:c.email||"",doc:c.doc||"",notes:c.notes||""});setEditId(c.id);setShowForm(true);};
   const save=()=>{
     if(!form.name.trim()){toast("Nome obrigatório.","err");return;}
-    if(editId){setDb(prev=>({...prev,clients:prev.clients.map(c=>c.id===editId?{...c,...form}:c)}));toast("Cliente atualizado!","ok");}
-    else{setDb(prev=>({...prev,clients:[...prev.clients,{id:nid(prev.clients),...form}]}));toast("Cliente cadastrado!","ok");}
+    try {
+      if(editId){ await actions.updateClient(editId, form); toast("Cliente atualizado!","ok"); }
+      else { await actions.createClient(form); toast("Cliente cadastrado!","ok"); }
+    } catch(e) { toast("Erro ao salvar cliente.","err"); console.error(e); return; }
     setShowForm(false);
   };
-  const del=c=>{if(!window.confirm(`Excluir cliente ${c.name}?`))return;setDb(prev=>({...prev,clients:prev.clients.filter(x=>x.id!==c.id)}));toast("Cliente excluído.","ok");};
+  const del=async c=>{
+    try { await actions.deleteClient(c.id); toast("Cliente excluído.","ok"); }
+    catch(e) { toast("Erro ao excluir.","err"); console.error(e); }
+  };
 
   return(
     <div>
@@ -2563,7 +2573,7 @@ function SellersPage({db, setDb, toast}) {
 
 
 // ─── PAYMENT METHODS ─────────────────────────
-function PaymentsPage({db, setDb, toast, currentUser}) {
+function PaymentsPage({db, setDb, toast, currentUser, actions}) {
   const [form,setForm]=useState({name:"",details:""});
   const [editId,setEditId]=useState(null);
   const [showForm,setShowForm]=useState(false);
@@ -2573,11 +2583,16 @@ function PaymentsPage({db, setDb, toast, currentUser}) {
   const openEdit=p=>{setForm({name:p.name,details:p.details||""});setEditId(p.id);setShowForm(true);};
   const save=()=>{
     if(!form.name.trim()){toast("Nome obrigatório.","err");return;}
-    if(editId){setDb(prev=>({...prev,payment_methods:prev.payment_methods.map(p=>p.id===editId?{...p,...form}:p)}));toast("Atualizado!","ok");}
-    else{setDb(prev=>({...prev,payment_methods:[...prev.payment_methods,{id:nid(prev.payment_methods),...form}]}));toast("Cadastrado!","ok");}
+    try {
+      if(editId){ await actions.updatePM(editId, form); toast("Atualizado!","ok"); }
+      else { await actions.createPM(form); toast("Cadastrado!","ok"); }
+    } catch(e) { toast("Erro ao salvar.","err"); console.error(e); return; }
     setShowForm(false);
   };
-  const del=p=>{if(!window.confirm(`Excluir "${p.name}"?`))return;setDb(prev=>({...prev,payment_methods:prev.payment_methods.filter(x=>x.id!==p.id)}));toast("Excluído.","ok");};
+  const del=async p=>{
+    try { await actions.deletePM(p.id); toast("Excluído.","ok"); }
+    catch(e) { toast("Erro ao excluir.","err"); console.error(e); }
+  };
 
   return(
     <div>
@@ -4467,140 +4482,10 @@ export default function App() {
     notifications:   sbData.notifications,
   };
 
-  // Smart setDb — detects what changed and calls correct Supabase action
+  // setDb — triggers Supabase reload for compatibility with existing components
   const setDb = useCallback((updater) => {
-    const prev = {
-      quarries:        sbData.quarries,
-      users:           sbData.team,
-      blocks:          sbData.blocks,
-      clients:         sbData.clients,
-      payment_methods: sbData.payment_methods,
-      sales:           sbData.sales,
-      orders:          sbData.orders,
-      block_releases:  sbData.block_releases,
-      favorites:       sbData.favorites,
-      access_history:  [],
-      notifications:   sbData.notifications,
-    };
-
-    const next = typeof updater === 'function' ? updater(prev) : updater;
-    if (!next) return;
-
-    // ── Detect and sync each changed table ──────────────────────────
-
-    // BLOCKS
-    if (next.blocks !== prev.blocks) {
-      const prevIds = new Set(prev.blocks.map(b => b.id));
-      const nextIds = new Set(next.blocks.map(b => b.id));
-      // Deleted
-      prev.blocks.filter(b => !nextIds.has(b.id)).forEach(b => actions.deleteBlock(b.id).catch(console.error));
-      // Added
-      next.blocks.filter(b => !prevIds.has(b.id)).forEach(b => {
-        const { id, sys_code, quarry, reserved_client, ...rest } = b;
-        actions.createBlock(rest).catch(console.error);
-      });
-      // Updated
-      next.blocks.filter(b => prevIds.has(b.id)).forEach(b => {
-        const old = prev.blocks.find(x => x.id === b.id);
-        if (JSON.stringify(old) !== JSON.stringify(b)) {
-          const { id, sys_code, company_id, created_by, created_at, updated_at, quarry, reserved_client, ...rest } = b;
-          actions.updateBlock(b.id, rest).catch(console.error);
-        }
-      });
-    }
-
-    // QUARRIES
-    if (next.quarries !== prev.quarries) {
-      const prevIds = new Set(prev.quarries.map(q => q.id));
-      const nextIds = new Set(next.quarries.map(q => q.id));
-      prev.quarries.filter(q => !nextIds.has(q.id)).forEach(q => actions.deleteQuarry(q.id).catch(console.error));
-      next.quarries.filter(q => !prevIds.has(q.id)).forEach(q => {
-        const { id, company_id, created_at, ...rest } = q;
-        actions.createQuarry(rest).catch(console.error);
-      });
-      next.quarries.filter(q => prevIds.has(q.id)).forEach(q => {
-        const old = prev.quarries.find(x => x.id === q.id);
-        if (JSON.stringify(old) !== JSON.stringify(q)) {
-          const { id, company_id, created_at, ...rest } = q;
-          actions.updateQuarry(q.id, rest).catch(console.error);
-        }
-      });
-    }
-
-    // CLIENTS
-    if (next.clients !== prev.clients) {
-      const prevIds = new Set(prev.clients.map(c => c.id));
-      const nextIds = new Set(next.clients.map(c => c.id));
-      prev.clients.filter(c => !nextIds.has(c.id)).forEach(c => actions.deleteClient(c.id).catch(console.error));
-      next.clients.filter(c => !prevIds.has(c.id)).forEach(c => {
-        const { id, company_id, created_at, ...rest } = c;
-        actions.createClient(rest).catch(console.error);
-      });
-      next.clients.filter(c => prevIds.has(c.id)).forEach(c => {
-        const old = prev.clients.find(x => x.id === c.id);
-        if (JSON.stringify(old) !== JSON.stringify(c)) {
-          const { id, company_id, created_at, ...rest } = c;
-          actions.updateClient(c.id, rest).catch(console.error);
-        }
-      });
-    }
-
-    // PAYMENT METHODS
-    if (next.payment_methods !== prev.payment_methods) {
-      const prevIds = new Set(prev.payment_methods.map(p => p.id));
-      const nextIds = new Set(next.payment_methods.map(p => p.id));
-      prev.payment_methods.filter(p => !nextIds.has(p.id)).forEach(p => actions.deletePM(p.id).catch(console.error));
-      next.payment_methods.filter(p => !prevIds.has(p.id)).forEach(p => {
-        const { id, company_id, created_at, ...rest } = p;
-        actions.createPM(rest).catch(console.error);
-      });
-      next.payment_methods.filter(p => prevIds.has(p.id)).forEach(p => {
-        const old = prev.payment_methods.find(x => x.id === p.id);
-        if (JSON.stringify(old) !== JSON.stringify(p)) {
-          const { id, company_id, created_at, ...rest } = p;
-          actions.updatePM(p.id, rest).catch(console.error);
-        }
-      });
-    }
-
-    // ORDERS
-    if (next.orders !== prev.orders) {
-      const prevIds = new Set(prev.orders.map(o => o.id));
-      next.orders.filter(o => !prevIds.has(o.id)).forEach(o => {
-        const { id, company_id, created_at, block, client, ...rest } = o;
-        actions.createOrder(rest).catch(console.error);
-      });
-      next.orders.filter(o => prevIds.has(o.id)).forEach(o => {
-        const old = prev.orders.find(x => x.id === o.id);
-        if (JSON.stringify(old) !== JSON.stringify(o)) {
-          const { id, company_id, created_at, block, client, ...rest } = o;
-          actions.updateOrder(o.id, rest).catch(console.error);
-        }
-      });
-    }
-
-    // BLOCK RELEASES
-    if (next.block_releases !== prev.block_releases) {
-      const prevKeys = new Set(prev.block_releases.map(r => r.block_id+'_'+r.client_id));
-      const nextKeys = new Set(next.block_releases.map(r => r.block_id+'_'+r.client_id));
-      prev.block_releases.filter(r => !nextKeys.has(r.block_id+'_'+r.client_id))
-        .forEach(r => actions.revokeRelease(r.block_id, r.client_id).catch(console.error));
-      next.block_releases.filter(r => !prevKeys.has(r.block_id+'_'+r.client_id))
-        .forEach(r => actions.releaseBlock(r.block_id, r.client_id).catch(console.error));
-    }
-
-    // NOTIFICATIONS (mark read)
-    if (next.notifications !== prev.notifications) {
-      next.notifications.filter(n => {
-        const old = prev.notifications.find(x => x.id === n.id);
-        return old && !old.read && n.read;
-      }).forEach(n => actions.markRead(n.id).catch(console.error));
-    }
-
-    // SALES (handle via actions.createSale / reverseSale directly in components)
-    // Reload after any change
-    setTimeout(() => actions.reload(), 500);
-  }, [sbData, actions]);
+    setTimeout(() => actions.reload(), 300);
+  }, [actions]);
 
   // Dollar rate fetch
   useEffect(() => {
@@ -4680,7 +4565,7 @@ export default function App() {
     ]}],
   };
   const RL={owner:"Dono da Empresa",foreman:"Encarregado",seller:"Vendedor",client:"Cliente"};
-  const props={currentUser:user,quarries:db.quarries,db,setDb,toast:showToast,globalDollarRate};
+  const props={currentUser:user,quarries:db.quarries,db,setDb,toast:showToast,globalDollarRate,actions};
 
   const renderPage=()=>{
     switch(page){
