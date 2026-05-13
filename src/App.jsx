@@ -4508,6 +4508,7 @@ export default function App() {
   };
 
   return (<>
+    <style>{CSS}</style>
     <div className="app">
       <div className="hdr">
         <button className="hbtn" onClick={()=>setSbOpen(v=>!v)}><Icon n="menu" s={20}/></button>
