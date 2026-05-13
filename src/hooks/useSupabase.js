@@ -325,6 +325,55 @@ export function useSupabase() {
     },
 
     reload,
+
+    // Team management
+    updateProfile: async (id, updates) => {
+      const { data, error } = await supabase.from('profiles').update(updates).eq('id', id).select().single()
+      if (error) throw error
+      return data
+    },
+
+    createTeamMember: async (email, password, profile) => {
+      // Sign up the new user
+      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { name: profile.name, role: profile.role || 'seller' }
+      })
+      if (authError) {
+        // Fallback: use signUp if admin not available
+        const { data: signupData, error: signupError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { name: profile.name, role: profile.role || 'seller' } }
+        })
+        if (signupError) throw signupError
+        // Set company_id and role in profile
+        if (signupData.user) {
+          await supabase.from('profiles').upsert({
+            id: signupData.user.id,
+            company_id: user.id,
+            ...profile,
+          })
+        }
+        return signupData
+      }
+      // Set company_id in profile for admin-created user
+      if (authData.user) {
+        await supabase.from('profiles').upsert({
+          id: authData.user.id,
+          company_id: user.id,
+          ...profile,
+        })
+      }
+      return authData
+    },
+
+    deleteTeamMember: async (profileId) => {
+      const { error } = await supabase.from('profiles').update({ active: false }).eq('id', profileId)
+      if (error) throw error
+    },
   }
 
   return { user, loading, data, actions }

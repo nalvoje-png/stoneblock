@@ -1747,9 +1747,9 @@ function BList({currentUser, quarries, db, setDb, toast, title, sub, bFilter, gl
   const temFiltroData = dtInicio || dtFim;
   const fmtDt         = d => d ? new Date(d+"T12:00:00").toLocaleDateString("pt-BR") : "";
 
-  const upd      = (id,ch) => setDb(prev=>({...prev,blocks:prev.blocks.map(b=>b.id===id?{...b,...ch}:b)}));
+  const upd      = async (id,ch) => { try { await actions?.updateBlock(id,ch); } catch(e) { console.error(e); setDb(prev=>({...prev,blocks:prev.blocks.map(b=>b.id===id?{...b,...ch}:b)})); } };
   const delBlock = (b,e)   => { e.stopPropagation(); setConfirmDel(b); };
-  const doDelete = ()      => { setDb(prev=>({...prev,blocks:prev.blocks.filter(x=>x.id!==confirmDel.id)})); toast(`Bloco ${confirmDel.code} excluído.`,"ok"); setConfirmDel(null); };
+  const doDelete = async () => { try { await actions?.deleteBlock(confirmDel.id); toast(`Bloco ${confirmDel.code} excluído.`,"ok"); } catch(e) { toast('Erro ao excluir.','err'); } setConfirmDel(null); };
   const chgStatus= (b,st)  => { upd(b.id,{status:st}); setSel(null); toast(`Status: "${SL[st]}"`, "ok"); };
 
   const canEdit   = currentUser.role==="owner"||currentUser.role==="seller"||currentUser.role==="foreman";
@@ -2419,7 +2419,7 @@ function CommissionsPage({db}) {
 
 
 // ─── SELLERS PAGE ────────────────────────────
-function SellersPage({db, setDb, toast}) {
+function SellersPage({db, setDb, toast, actions}) {
   const emptyForm = {name:"", email:"", password:"123", phone:"", commission:false, commission_pct:""};
   const [form,     setForm]     = useState(emptyForm);
   const [editId,   setEditId]   = useState(null);
@@ -2432,33 +2432,41 @@ function SellersPage({db, setDb, toast}) {
   const openNew  = () => { setForm(emptyForm); setEditId(null); setShowPw(false); setShowForm(true); };
   const openEdit = u  => { setForm({name:u.name, email:u.email, password:u.password||"", phone:u.phone||"", commission:u.commission||false, commission_pct:u.commission_pct||""}); setEditId(u.id); setShowPw(false); setShowForm(true); };
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim()) { toast("Nome obrigatório.", "err"); return; }
     if (!form.email.trim()) { toast("E-mail obrigatório.", "err"); return; }
+    if (!editId && !form.password.trim()) { toast("Senha obrigatória.", "err"); return; }
     if (form.commission && (!form.commission_pct || parseFloat(form.commission_pct) <= 0)) {
       toast("Informe o percentual de comissão.", "err"); return;
     }
-    const data = {
-      name: form.name.trim(), email: form.email.trim(), password: form.password||"123",
-      phone: form.phone.trim(), role: "seller", quarry_id: null,
-      commission: form.commission, commission_pct: form.commission ? parseFloat(form.commission_pct) : 0,
+    const profileData = {
+      name: form.name.trim(),
+      phone: form.phone.trim(),
+      commission: form.commission,
+      commission_pct: form.commission ? parseFloat(form.commission_pct) : 0,
       avatar: form.name.trim().split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase(),
     };
-    if (editId) {
-      setDb(prev=>({...prev, users: prev.users.map(u => u.id===editId ? {...u,...data} : u)}));
-      toast("Vendedor atualizado!", "ok");
-    } else {
-      if (db.users.find(u=>u.email===form.email)) { toast("E-mail já cadastrado.", "err"); return; }
-      setDb(prev=>({...prev, users:[...prev.users, {id:nid(prev.users), ...data}]}));
-      toast("Vendedor cadastrado!", "ok");
+    try {
+      if (editId) {
+        await actions.updateProfile(editId, profileData);
+        toast("Vendedor atualizado!", "ok");
+      } else {
+        // Create user in Supabase Auth + profile
+        await actions.createTeamMember(form.email.trim(), form.password, { ...profileData, role: "seller" });
+        toast("Vendedor cadastrado! Um e-mail de confirmação foi enviado.", "ok");
+      }
+      setShowForm(false);
+    } catch(e) {
+      toast(e.message || "Erro ao salvar vendedor.", "err");
+      console.error(e);
     }
-    setShowForm(false);
   };
 
-  const del = u => {
-    if (!window.confirm(`Excluir o vendedor "${u.name}"?`)) return;
-    setDb(prev=>({...prev, users: prev.users.filter(x=>x.id!==u.id)}));
-    toast("Vendedor excluído.", "ok");
+  const del = async u => {
+    try {
+      await actions.deleteTeamMember(u.id);
+      toast("Vendedor removido.", "ok");
+    } catch(e) { toast("Erro ao remover.", "err"); console.error(e); }
   };
 
   // Calculate commission per seller from sales
@@ -4514,8 +4522,14 @@ export default function App() {
 
   const fmFilter=useCallback(b=>b.quarry_id===user?.quarry_id,[user?.quarry_id]);
 
-  // Loading screen
-  if (loading) return (
+  // Loading screen — max 8 seconds then show login
+  const [loadTimeout, setLoadTimeout] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setLoadTimeout(true), 8000);
+    return () => clearTimeout(t);
+  }, []);
+
+  if (loading && !loadTimeout) return (
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0c1a2e"}}>
       <div style={{textAlign:"center",color:"#fff"}}>
         <div style={{fontFamily:"Sora,sans-serif",fontSize:28,fontWeight:800,marginBottom:12}}>Stone <span style={{color:"#60a5fa"}}>Block</span></div>
@@ -4586,7 +4600,7 @@ export default function App() {
       case "orders":   return <Ords     key="orders"   {...props}/>;
       case "sales":    return <SalesHist currentUser={user} db={db}/>;
       case "quarries": return <QuarriesPage db={db} setDb={setDb} toast={showToast}/>;
-      case "sellers":  return <SellersPage  db={db} setDb={setDb} toast={showToast}/>;
+      case "sellers":  return <SellersPage  db={db} setDb={setDb} toast={showToast} actions={actions}/>;
       case "commissions": return <CommissionsPage db={db}/>;
       case "clients":  return <ClientsPage db={db} setDb={setDb} toast={showToast} currentUser={user}/>;
       case "payments": return <PaymentsPage db={db} setDb={setDb} toast={showToast} currentUser={user}/>;
