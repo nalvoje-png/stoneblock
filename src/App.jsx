@@ -2184,7 +2184,7 @@ function ClientsPage({db, setDb, toast, currentUser, actions}) {
 
   const openNew=()=>{setForm({name:"",country:"Brasil",phone:"",email:"",doc:"",notes:""});setEditId(null);setShowForm(true);};
   const openEdit=c=>{setForm({name:c.name,country:c.country,phone:c.phone||"",email:c.email||"",doc:c.doc||"",notes:c.notes||""});setEditId(c.id);setShowForm(true);};
-  const save=()=>{
+  const save=async ()=>{
     if(!form.name.trim()){toast("Nome obrigatório.","err");return;}
     try {
       if(editId){ await actions.updateClient(editId, form); toast("Cliente atualizado!","ok"); }
@@ -2573,7 +2573,7 @@ function PaymentsPage({db, setDb, toast, currentUser, actions}) {
 
   const openNew=()=>{setForm({name:"",details:""});setEditId(null);setShowForm(true);};
   const openEdit=p=>{setForm({name:p.name,details:p.details||""});setEditId(p.id);setShowForm(true);};
-  const save=()=>{
+  const save=async ()=>{
     if(!form.name.trim()){toast("Nome obrigatório.","err");return;}
     try {
       if(editId){ await actions.updatePM(editId, form); toast("Atualizado!","ok"); }
@@ -4435,7 +4435,10 @@ function SalesHist({currentUser, db}) {
 
 // ─── APP ─────────────────────────────────────
 export default function App() {
-  const { user, loading, data: sbData, actions } = useSupabase();
+  const { user:sbUser, loading, data: sbData, actions } = useSupabase();
+  const [localUser, setLocalUser] = useState(null);
+  // Use Supabase user if available, fallback to local
+  const user = sbUser || localUser;
   const [page,setPage]=useState("dashboard");
   const [sbOpen,setSbOpen]=useState(false);
   const [notifOpen,setNotifOpen]=useState(false);
@@ -4443,41 +4446,33 @@ export default function App() {
   const [confirmReset,setConfirmReset]=useState(false);
   const [globalDollarRate, setGlobalDollarRate] = useState("");
 
-  // Build db object compatible with existing components
-  const db = {
-    quarries:        sbData.quarries,
-    users:           sbData.team,
-    blocks:          sbData.blocks.map(b => ({
-      ...b,
-      quarry_id:   b.quarry_id,
-      reserved_for: b.reserved_for,
-      photos:      b.photos || [],
-      created_at:  b.created_at,
-    })),
-    clients:         sbData.clients,
-    payment_methods: sbData.payment_methods,
-    sales:           sbData.sales.map(s => ({
-      ...s,
-      block_ids:          (s.sale_blocks||[]).map(sb=>sb.block_id),
-      seller_id:          s.seller_id,
-      client_id:          s.client_id,
-      payment_method_id:  s.payment_method_id,
-    })),
-    orders:          sbData.orders.map(o => ({
-      ...o,
-      block_id:   o.block_id,
-      client_id:  o.client_id,
-    })),
-    block_releases:  sbData.block_releases,
-    favorites:       sbData.favorites,
-    access_history:  [],
-    notifications:   sbData.notifications,
-  };
+  // localStorage fallback — used when Supabase is not connected
+  const [localDb, setLocalDb] = useState(() => loadDb() || SEED);
+  useEffect(() => { if (!sbUser) saveDb(localDb); }, [localDb, sbUser]);
 
-  // setDb — triggers Supabase reload for compatibility with existing components
+  // Build db — Supabase data if logged in, localStorage otherwise
+  const db = sbUser ? {
+    quarries:        sbData.quarries || [],
+    users:           sbData.team || [],
+    blocks:          (sbData.blocks||[]).map(b => ({...b, photos: b.photos||[], created_at: b.created_at})),
+    clients:         sbData.clients || [],
+    payment_methods: sbData.payment_methods || [],
+    sales:           (sbData.sales||[]).map(s => ({...s, block_ids:(s.sale_blocks||[]).map(x=>x.block_id)})),
+    orders:          sbData.orders || [],
+    block_releases:  sbData.block_releases || [],
+    favorites:       sbData.favorites || [],
+    access_history:  [],
+    notifications:   sbData.notifications || [],
+  } : localDb;
+
+  // setDb — Supabase when connected, localStorage otherwise
   const setDb = useCallback((updater) => {
-    setTimeout(() => actions.reload(), 300);
-  }, [actions]);
+    if (sbUser) {
+      setTimeout(() => actions.reload(), 300);
+    } else {
+      setLocalDb(updater);
+    }
+  }, [sbUser, actions]);
 
   // Dollar rate fetch
   useEffect(() => {
@@ -4522,7 +4517,16 @@ export default function App() {
     </div>
   );
 
-  if(!user)return <LoginPage onLogin={async(em,pw)=>{ await actions.signIn(em,pw); }}/>;
+  if(!user)return <LoginPage onLogin={async(em,pw)=>{
+  try {
+    await actions.signIn(em,pw);
+  } catch(e) {
+    // Fallback to local login
+    const u=(localDb.users||SEED.users).find(u=>u.email===em&&u.password===pw);
+    if(u) setLocalUser(u);
+    else throw e;
+  }
+}}/>;
 
   const nc=db.notifications.filter(n=>n.user_id===user.id&&!n.read).length;
   const pc=db.orders.filter(o=>o.status==="pending").length;
@@ -4625,7 +4629,7 @@ export default function App() {
               <div className="av" style={{width:34,height:34,fontSize:12}}>{user.avatar}</div>
               <div style={{flex:1,minWidth:0}}><div className="sbun">{user.name}</div><div className="sbur">{RL[user.role]}</div></div>
             </div>
-            <button className="lobtn" onClick={async()=>{await actions.signOut();setSbOpen(false);}}><Icon n="out" s={14}/> Sair</button>
+            <button className="lobtn" onClick={async()=>{ try{await actions.signOut();}catch(e){} setLocalUser(null); setSbOpen(false);}}><Icon n="out" s={14}/> Sair</button>
             {user.role==="owner"&&(
               <button onClick={()=>setConfirmReset(true)} style={{width:"100%",marginTop:8,display:"flex",alignItems:"center",gap:8,padding:"7px 12px",background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.15)",borderRadius:8,color:"rgba(252,165,165,.55)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
                 🔄 Resetar dados de teste
