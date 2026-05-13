@@ -2420,157 +2420,142 @@ function CommissionsPage({db}) {
 
 // ─── SELLERS PAGE ────────────────────────────
 function SellersPage({db, setDb, toast, actions}) {
-  const emptyForm = {name:"", email:"", password:"123", phone:"", commission:false, commission_pct:""};
+  const emptyForm = {name:"", phone:"", role:"seller", commission:false, commission_pct:""};
   const [form,     setForm]     = useState(emptyForm);
   const [editId,   setEditId]   = useState(null);
   const [showForm, setShowForm] = useState(false);
-  const [showPw,   setShowPw]   = useState(false);
   const sv = (k,v) => setForm(x=>({...x,[k]:v}));
 
-  const sellers = db.users.filter(u => u.role === "seller");
+  const team = (db.users||[]).filter(u => u.role==="seller"||u.role==="foreman");
+  const RL2  = {seller:"Vendedor", foreman:"Encarregado"};
 
-  const openNew  = () => { setForm(emptyForm); setEditId(null); setShowPw(false); setShowForm(true); };
-  const openEdit = u  => { setForm({name:u.name, email:u.email, password:u.password||"", phone:u.phone||"", commission:u.commission||false, commission_pct:u.commission_pct||""}); setEditId(u.id); setShowPw(false); setShowForm(true); };
+  const openEdit = u => {
+    setForm({name:u.name||"", phone:u.phone||"", role:u.role||"seller", commission:u.commission||false, commission_pct:u.commission_pct||""});
+    setEditId(u.id); setShowForm(true);
+  };
 
   const save = async () => {
-    if (!form.name.trim()) { toast("Nome obrigatório.", "err"); return; }
-    if (!form.email.trim()) { toast("E-mail obrigatório.", "err"); return; }
-    if (!editId && !form.password.trim()) { toast("Senha obrigatória.", "err"); return; }
-    if (form.commission && (!form.commission_pct || parseFloat(form.commission_pct) <= 0)) {
-      toast("Informe o percentual de comissão.", "err"); return;
+    if (!form.name.trim()) { toast("Nome obrigatório.","err"); return; }
+    if (form.commission && (!form.commission_pct || parseFloat(form.commission_pct)<=0)) {
+      toast("Informe o percentual de comissão.","err"); return;
     }
-    const profileData = {
-      name: form.name.trim(),
-      phone: form.phone.trim(),
-      commission: form.commission,
+    const upd = {
+      name:           form.name.trim(),
+      phone:          form.phone.trim(),
+      role:           form.role,
+      commission:     form.commission,
       commission_pct: form.commission ? parseFloat(form.commission_pct) : 0,
-      avatar: form.name.trim().split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase(),
+      avatar:         form.name.trim().split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase(),
     };
     try {
-      if (editId) {
-        await actions.updateProfile(editId, profileData);
-        toast("Vendedor atualizado!", "ok");
-      } else {
-        // Create user in Supabase Auth + profile
-        await actions.createTeamMember(form.email.trim(), form.password, { ...profileData, role: "seller" });
-        toast("Vendedor cadastrado! Um e-mail de confirmação foi enviado.", "ok");
-      }
+      await actions.updateProfile(editId, upd);
+      toast("Membro atualizado!","ok");
       setShowForm(false);
-    } catch(e) {
-      toast(e.message || "Erro ao salvar vendedor.", "err");
-      console.error(e);
-    }
+    } catch(e) { toast("Erro ao salvar.","err"); console.error(e); }
   };
 
-  const del = async u => {
-    try {
-      await actions.deleteTeamMember(u.id);
-      toast("Vendedor removido.", "ok");
-    } catch(e) { toast("Erro ao remover.", "err"); console.error(e); }
-  };
-
-  // Calculate commission per seller from sales
   const sellerTotals = u => {
-    const sales = db.sales.filter(s => s.seller_id === u.id);
-    const totalBRL = sales.reduce((a,s) => a + (s.total_brl||0), 0);
-    const commission = u.commission && u.commission_pct > 0 ? totalBRL * (u.commission_pct/100) : 0;
-    return { count: sales.length, totalBRL, commission };
+    const sales = db.sales.filter(s => s.seller_id===u.id);
+    const totalBRL = sales.reduce((a,s)=>a+(s.total_brl||0),0);
+    const commission = u.commission&&u.commission_pct>0 ? totalBRL*(u.commission_pct/100) : 0;
+    return { count:sales.length, totalBRL, commission };
   };
 
   return (
     <div>
       <div className="ph">
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
-          <div><div className="ptit">Vendedores</div><div className="psub">{sellers.length} vendedor(es) cadastrado(s)</div></div>
-          <button className="btn bb" onClick={openNew}><Icon n="plus" s={15}/> Novo Vendedor</button>
+        <div className="ptit">Equipe</div>
+        <div className="psub">{team.length} membro(s) cadastrado(s)</div>
+      </div>
+
+      {/* How to add members */}
+      <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:"var(--r-md)",padding:"14px 18px",marginBottom:20,fontSize:13,color:"#1e40af"}}>
+        <div style={{fontWeight:700,marginBottom:6}}>➕ Como cadastrar novos membros</div>
+        <div style={{lineHeight:1.7}}>
+          1. Acesse <strong>supabase.com</strong> → seu projeto → <strong>Authentication → Users</strong><br/>
+          2. Clique em <strong>"Add user" → "Create new user"</strong> → informe e-mail e senha<br/>
+          3. No <strong>SQL Editor</strong> rode o comando abaixo substituindo os dados:<br/>
+        </div>
+        <div style={{marginTop:10,background:"#1e3a8a",color:"#bfdbfe",borderRadius:6,padding:"10px 14px",fontFamily:"monospace",fontSize:11,lineHeight:1.8}}>
+          {"update public.profiles"}<br/>
+          {"set role = 'seller', -- ou 'foreman' para encarregado"}<br/>
+          {"    company_id = (select id from public.profiles where role = 'owner' limit 1),"}<br/>
+          {"    name = 'Nome da Pessoa'"}<br/>
+          {"where id = (select id from auth.users where email = 'email@pessoa.com');"}
+        </div>
+        <div style={{marginTop:8,fontSize:12,color:"#3b82f6"}}>
+          Após rodar o comando, a pessoa já aparece aqui e pode fazer login no sistema.
         </div>
       </div>
 
-      {sellers.length === 0
-        ? <div className="es"><div style={{marginBottom:16,opacity:.3}}><Icon n="user" s={48}/></div><div className="estit">Nenhum vendedor cadastrado</div></div>
-        : <div style={{display:"flex",flexDirection:"column",gap:12}}>
-            {sellers.map(u => {
-              const t = sellerTotals(u);
-              return (
-                <div key={u.id} className="card"><div className="cb">
-                  <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
-                    <div style={{display:"flex",gap:14,flex:1}}>
-                      <div style={{width:46,height:46,borderRadius:12,background:"linear-gradient(135deg,var(--b6),var(--b4))",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Sora,sans-serif",fontWeight:800,fontSize:16,flexShrink:0}}>{u.avatar}</div>
+      {/* Team list */}
+      {team.length===0
+        ? <div className="es"><div style={{marginBottom:16,opacity:.3}}><Icon n="user" s={48}/></div><div className="estit">Nenhum membro na equipe ainda</div><div style={{fontSize:13,color:"var(--mist)",marginTop:8}}>Siga as instruções acima para cadastrar.</div></div>
+        : <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            {team.map(u=>{
+              const {count,totalBRL,commission}=sellerTotals(u);
+              return(
+                <div key={u.id} className="card">
+                  <div className="cb">
+                    <div style={{display:"flex",alignItems:"flex-start",gap:16,flexWrap:"wrap"}}>
+                      <div style={{width:52,height:52,borderRadius:14,background:"linear-gradient(135deg,var(--sap7),var(--sap5))",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Sora,sans-serif",fontWeight:800,fontSize:18,flexShrink:0}}>
+                        {u.avatar||u.name?.substring(0,2).toUpperCase()}
+                      </div>
                       <div style={{flex:1}}>
-                        <div style={{fontFamily:"Sora,sans-serif",fontWeight:700,fontSize:15,color:"var(--b8)"}}>{u.name}</div>
-                        <div style={{fontSize:12,color:"var(--mut)",marginTop:2}}>📧 {u.email}</div>
-                        {u.phone&&<div style={{fontSize:12,color:"var(--mut)"}}>📱 {u.phone}</div>}
-                        <div style={{display:"flex",flexWrap:"wrap",gap:12,marginTop:8,fontSize:12}}>
-                          <span style={{background:"var(--g0)",padding:"3px 10px",borderRadius:20,border:"1px solid var(--bdr)"}}>🛒 {t.count} venda(s)</span>
-                          <span style={{background:"var(--g0)",padding:"3px 10px",borderRadius:20,border:"1px solid var(--bdr)"}}>💰 {money(t.totalBRL,"BRL")} em vendas</span>
-                          {u.commission && u.commission_pct > 0
-                            ? <span style={{background:"#dcfce7",padding:"3px 10px",borderRadius:20,border:"1px solid #bbf7d0",color:"#15803d",fontWeight:600}}>
-                                🏆 {u.commission_pct}% comissão = {money(t.commission,"BRL")}
-                              </span>
-                            : <span style={{background:"var(--g1)",padding:"3px 10px",borderRadius:20,border:"1px solid var(--g3)",color:"var(--mut)"}}>Sem comissão</span>
-                          }
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                          <div style={{fontFamily:"Sora,sans-serif",fontWeight:700,fontSize:16,color:"var(--ink2)"}}>{u.name}</div>
+                          <span className="bdg" style={{background:u.role==="foreman"?"#fef3c7":"#dbeafe",color:u.role==="foreman"?"#92400e":"#1e40af",fontSize:10}}>{RL2[u.role]||u.role}</span>
+                        </div>
+                        <div style={{fontSize:12,color:"var(--mist)",marginBottom:10}}>{u.email} {u.phone&&`· ${u.phone}`}</div>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                          <div className="di"><div className="dilbl">Vendas</div><div className="dival">{count}</div></div>
+                          <div className="di"><div className="dilbl">Total vendido</div><div className="dival" style={{fontSize:13,color:"var(--sap7)"}}>{money(totalBRL,"BRL")}</div></div>
+                          <div className="di" style={{background:commission>0?"#fefce8":"var(--haze)",border:commission>0?"1px solid #fde68a":"1px solid var(--bdr2)"}}>
+                            <div className="dilbl">Comissão{u.commission_pct>0?` (${u.commission_pct}%)`:""}</div>
+                            <div className="dival" style={{color:commission>0?"#d97706":"var(--mist)"}}>{commission>0?money(commission,"BRL"):"Sem comissão"}</div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div style={{display:"flex",gap:6,alignItems:"flex-start"}}>
                       <button className="btn bo bsm" onClick={()=>openEdit(u)}><Icon n="edit" s={14}/> Editar</button>
-                      <button className="btn br bsm" onClick={()=>del(u)}><Icon n="trash" s={14}/></button>
                     </div>
                   </div>
-                </div></div>
+                </div>
               );
             })}
           </div>
       }
 
-      {showForm && (
-        <div className="mo" onClick={e=>e.target===e.currentTarget&&setShowForm(false)}>
-          <div className="md" onClick={e=>e.stopPropagation()}>
+      {/* Edit modal */}
+      {showForm&&(
+        <div className="mo" onClick={()=>setShowForm(false)}>
+          <div className="md" style={{maxWidth:460}} onClick={e=>e.stopPropagation()}>
             <div className="mhead">
-              <div className="mtit">{editId?"Editar Vendedor":"Novo Vendedor"}</div>
+              <div className="mtit">Editar Membro</div>
               <button className="btn bo bic bsm" onClick={()=>setShowForm(false)}><Icon n="x" s={16}/></button>
             </div>
             <div className="mbody">
-              <div className="fr2">
-                <div className="fg"><label className="fl">Nome completo *</label><input className="fc" value={form.name} onChange={e=>sv("name",e.target.value)} placeholder="Nome do vendedor"/></div>
-                <div className="fg"><label className="fl">Telefone / WhatsApp</label><input className="fc" value={form.phone} onChange={e=>sv("phone",e.target.value)} placeholder="+55 27 99999-0000"/></div>
+              <div className="fg"><label className="fl">Nome *</label><input className="fc" value={form.name} onChange={e=>sv("name",e.target.value)} placeholder="Nome completo"/></div>
+              <div className="fg"><label className="fl">Telefone / WhatsApp</label><input className="fc" value={form.phone} onChange={e=>sv("phone",e.target.value)} placeholder="+55 27 99999-0000"/></div>
+              <div className="fg">
+                <label className="fl">Função</label>
+                <select className="fc" value={form.role} onChange={e=>sv("role",e.target.value)}>
+                  <option value="seller">Vendedor</option>
+                  <option value="foreman">Encarregado</option>
+                </select>
               </div>
-              <div className="fr2">
-                <div className="fg"><label className="fl">E-mail (login) *</label><input className="fc" type="email" value={form.email} onChange={e=>sv("email",e.target.value)} placeholder="vendedor@empresa.com"/></div>
-                <div className="fg"><label className="fl">Senha de acesso</label>
-                  <div style={{position:"relative"}}>
-                    <input className="fc" type={showPw?"text":"password"} value={form.password} onChange={e=>sv("password",e.target.value)} placeholder="Senha de acesso" style={{paddingRight:40}}/>
-                    <button onClick={()=>setShowPw(v=>!v)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"var(--mut)",display:"flex"}}><Icon n={showPw?"eyex":"eye"} s={16}/></button>
+              <div className="fg">
+                <div style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",marginBottom:8}} onClick={()=>sv("commission",!form.commission)}>
+                  <div style={{width:20,height:20,borderRadius:5,border:"2px solid",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",borderColor:form.commission?"var(--sap6)":"var(--fog)",background:form.commission?"var(--sap6)":"transparent"}}>
+                    {form.commission&&<svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                   </div>
+                  <label className="fl" style={{cursor:"pointer",margin:0}}>Recebe comissão sobre vendas</label>
                 </div>
+                {form.commission&&<input className="fc" type="number" min="0" max="100" step="0.5" value={form.commission_pct} onChange={e=>sv("commission_pct",e.target.value)} placeholder="Ex: 5 (significa 5%)"/>}
               </div>
-
-              <hr className="dvd"/>
-              <div className="seclbl">Comissão sobre Vendas</div>
-
-              <div style={{background:"var(--g0)",border:"1.5px solid var(--bdr)",borderRadius:10,padding:"16px 18px",cursor:"pointer",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",gap:16}} onClick={()=>sv("commission",!form.commission)}>
-                <div>
-                  <div style={{fontWeight:700,fontSize:14,color:"var(--g8)"}}>Este vendedor recebe comissão?</div>
-                  <div style={{fontSize:12,color:"var(--mut)",marginTop:3}}>{form.commission?"✅ Sim — informe o percentual abaixo":"❌ Não — sem comissão sobre vendas"}</div>
-                </div>
-                <div style={{width:44,height:24,borderRadius:12,background:form.commission?"var(--grn)":"var(--g3)",transition:"background .2s",position:"relative",flexShrink:0}}>
-                  <div style={{position:"absolute",top:3,left:form.commission?22:3,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left .2s",boxShadow:"0 1px 4px rgba(0,0,0,.2)"}}/>
-                </div>
-              </div>
-
-              {form.commission && (
-                <div className="fg">
-                  <label className="fl">Percentual de Comissão (%)</label>
-                  <div style={{display:"flex",alignItems:"center",gap:12}}>
-                    <input className="fc" type="number" step="0.1" min="0" max="100" value={form.commission_pct} onChange={e=>sv("commission_pct",e.target.value)} placeholder="Ex: 5" style={{width:140}}/>
-                    <span style={{fontSize:14,color:"var(--mut)"}}>% sobre o total de cada venda</span>
-                  </div>
-                </div>
-              )}
             </div>
             <div className="mfoot">
               <button className="btn bo" onClick={()=>setShowForm(false)}>Cancelar</button>
-              <button className="btn bb" onClick={save}><Icon n="check" s={15}/> {editId?"Salvar Alterações":"Cadastrar Vendedor"}</button>
+              <button className="btn bb" onClick={save}>Salvar</button>
             </div>
           </div>
         </div>
@@ -2580,7 +2565,6 @@ function SellersPage({db, setDb, toast, actions}) {
 }
 
 
-// ─── PAYMENT METHODS ─────────────────────────
 function PaymentsPage({db, setDb, toast, currentUser, actions}) {
   const [form,setForm]=useState({name:"",details:""});
   const [editId,setEditId]=useState(null);
