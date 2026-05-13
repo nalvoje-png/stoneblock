@@ -1,6 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useSupabase } from "./hooks/useSupabase";
-import { supabase } from "./supabase";
 
 // ─── SEED ────────────────────────────────────
 const SEED = {
@@ -1098,10 +1096,8 @@ function Reg({currentUser,quarries,db,setDb,toast,actions}) {
     const N=cur.net_l&&cur.net_h&&cur.net_w?calcV(cur.net_l,cur.net_h,cur.net_w):0;
     const P=parseFloat(cur.price_m3)||0;
     const snap={code:cur.code.trim(),quarry_id:parseInt(cur.quarry_id,10),material:cur.material,classification:cur.classification,gross_l:parseFloat(cur.gross_l)||0,gross_h:parseFloat(cur.gross_h)||0,gross_w:parseFloat(cur.gross_w)||0,net_l:parseFloat(cur.net_l)||0,net_h:parseFloat(cur.net_h)||0,net_w:parseFloat(cur.net_w)||0,gross_volume:G,net_volume:N,currency:cur.currency,price_m3:P,total_value:parseFloat((N*P).toFixed(2)),status:"available",photos:[...cur.photos],notes:cur.notes,created_by:currentUser.id,created_at:cur.prod_date?new Date(cur.prod_date+"T12:00:00").toISOString():new Date().toISOString()};
-    actions.createBlock(snap).then(()=>{
-      setF({...defaultForm});
-      toast("Bloco cadastrado com sucesso!","ok");
-    }).catch(e=>{ toast("Erro ao salvar bloco.","err"); console.error(e); });
+    setDb(prev=>{const sysCode=genBlockId(prev.blocks);return({...prev,blocks:[...prev.blocks,{id:nid(prev.blocks),sys_code:sysCode,...snap}],notifications:[...prev.notifications,{id:nid(prev.notifications),user_id:1,message:`Novo bloco: ${snap.code} — ${snap.material}`,read:false,created_at:new Date().toISOString(),type:"new_block"}]})});
+    setF({...defaultForm});toast("Bloco cadastrado com sucesso!","ok");
   };
 
   const qOpts=quarries; // todos os roles veem todas as pedreiras
@@ -1747,9 +1743,9 @@ function BList({currentUser, quarries, db, setDb, toast, title, sub, bFilter, gl
   const temFiltroData = dtInicio || dtFim;
   const fmtDt         = d => d ? new Date(d+"T12:00:00").toLocaleDateString("pt-BR") : "";
 
-  const upd      = async (id,ch) => { try { await actions?.updateBlock(id,ch); } catch(e) { console.error(e); setDb(prev=>({...prev,blocks:prev.blocks.map(b=>b.id===id?{...b,...ch}:b)})); } };
+  const upd      = (id,ch) => setDb(prev=>({...prev,blocks:prev.blocks.map(b=>b.id===id?{...b,...ch}:b)}));
   const delBlock = (b,e)   => { e.stopPropagation(); setConfirmDel(b); };
-  const doDelete = async () => { try { await actions?.deleteBlock(confirmDel.id); toast(`Bloco ${confirmDel.code} excluído.`,"ok"); } catch(e) { toast('Erro ao excluir.','err'); } setConfirmDel(null); };
+  const doDelete = () => { setDb(prev=>({...prev,blocks:prev.blocks.filter(x=>x.id!==confirmDel.id)})); toast(`Bloco ${confirmDel.code} excluído.`,"ok"); setConfirmDel(null); };
   const chgStatus= (b,st)  => { upd(b.id,{status:st}); setSel(null); toast(`Status: "${SL[st]}"`, "ok"); };
 
   const canEdit   = currentUser.role==="owner"||currentUser.role==="seller"||currentUser.role==="foreman";
@@ -1972,7 +1968,7 @@ function BList({currentUser, quarries, db, setDb, toast, title, sub, bFilter, gl
 }
 
 // ─── QUARRIES PAGE ───────────────────────────
-function QuarriesPage({db, setDb, toast, actions}) {
+function QuarriesPage({db, setDb, toast}) {
   const emptyForm = { name:"", location:"", materials:[] };
   const [form,    setForm]    = useState(emptyForm);
   const [editId,  setEditId]  = useState(null);
@@ -1993,28 +1989,24 @@ function QuarriesPage({db, setDb, toast, actions}) {
   };
   const removeMaterial = m => sv("materials", form.materials.filter(x=>x!==m));
 
-  const save = async () => {
+  const save = () => {
     if (!form.name.trim()) { toast("Nome da pedreira obrigatório.","err"); return; }
     if (form.materials.length === 0) { toast("Adicione ao menos um material.","err"); return; }
-    try {
-      if (editId) {
-        await actions.updateQuarry(editId, form);
-        toast("Pedreira atualizada!","ok");
-      } else {
-        await actions.createQuarry(form);
-        toast("Pedreira cadastrada!","ok");
-      }
-      setShowForm(false);
-    } catch(e) { toast("Erro ao salvar. Tente novamente.","err"); console.error(e); }
+    if (editId) {
+      setDb(prev=>({...prev, quarries: prev.quarries.map(q=>q.id===editId?{...q,...form}:q)}));
+      toast("Pedreira atualizada!","ok");
+    } else {
+      setDb(prev=>({...prev, quarries:[...prev.quarries,{id:nid(prev.quarries),...form}]}));
+      toast("Pedreira cadastrada!","ok");
+    }
+    setShowForm(false);
   };
 
-  const del = async q => {
+  const del = q => {
     const inUse = db.blocks.some(b=>b.quarry_id===q.id);
     if (inUse) { toast("Não é possível excluir: existem blocos vinculados a esta pedreira.","err"); return; }
-    try {
-      await actions.deleteQuarry(q.id);
-      toast("Pedreira excluída.","ok");
-    } catch(e) { toast("Erro ao excluir.","err"); console.error(e); }
+    setDb(prev=>({...prev, quarries:prev.quarries.filter(x=>x.id!==q.id)}));
+    toast("Pedreira excluída.","ok");
   };
 
   const MATERIAL_SUGGESTIONS = [
@@ -2176,7 +2168,7 @@ function QuarriesPage({db, setDb, toast, actions}) {
 
 
 // ─── CLIENT REGISTER ─────────────────────────
-function ClientsPage({db, setDb, toast, currentUser, actions}) {
+function ClientsPage({db, setDb, toast, currentUser}) {
   const [form,setForm]=useState({name:"",country:"Brasil",phone:"",email:"",doc:"",notes:""});
   const [editId,setEditId]=useState(null);
   const [showForm,setShowForm]=useState(false);
@@ -2186,16 +2178,11 @@ function ClientsPage({db, setDb, toast, currentUser, actions}) {
   const openEdit=c=>{setForm({name:c.name,country:c.country,phone:c.phone||"",email:c.email||"",doc:c.doc||"",notes:c.notes||""});setEditId(c.id);setShowForm(true);};
   const save=async ()=>{
     if(!form.name.trim()){toast("Nome obrigatório.","err");return;}
-    try {
-      if(editId){ await actions.updateClient(editId, form); toast("Cliente atualizado!","ok"); }
-      else { await actions.createClient(form); toast("Cliente cadastrado!","ok"); }
-    } catch(e) { toast("Erro ao salvar cliente.","err"); console.error(e); return; }
+    if(editId){setDb(prev=>({...prev,clients:prev.clients.map(c=>c.id===editId?{...c,...form}:c)}));toast("Cliente atualizado!","ok");}
+    else{setDb(prev=>({...prev,clients:[...prev.clients,{id:nid(prev.clients),...form}]}));toast("Cliente cadastrado!","ok");}
     setShowForm(false);
   };
-  const del=async c=>{
-    try { await actions.deleteClient(c.id); toast("Cliente excluído.","ok"); }
-    catch(e) { toast("Erro ao excluir.","err"); console.error(e); }
-  };
+  const del=c=>{setDb(prev=>({...prev,clients:prev.clients.filter(x=>x.id!==c.id)}));toast("Cliente excluído.","ok");};
 
   return(
     <div>
@@ -2419,7 +2406,7 @@ function CommissionsPage({db}) {
 
 
 // ─── SELLERS PAGE ────────────────────────────
-function SellersPage({db, setDb, toast, actions}) {
+function SellersPage({db, setDb, toast}) {
   const emptyForm = {name:"", phone:"", role:"seller", commission:false, commission_pct:""};
   const [form,     setForm]     = useState(emptyForm);
   const [editId,   setEditId]   = useState(null);
@@ -2565,7 +2552,7 @@ function SellersPage({db, setDb, toast, actions}) {
 }
 
 
-function PaymentsPage({db, setDb, toast, currentUser, actions}) {
+function PaymentsPage({db, setDb, toast, currentUser}) {
   const [form,setForm]=useState({name:"",details:""});
   const [editId,setEditId]=useState(null);
   const [showForm,setShowForm]=useState(false);
@@ -2575,16 +2562,11 @@ function PaymentsPage({db, setDb, toast, currentUser, actions}) {
   const openEdit=p=>{setForm({name:p.name,details:p.details||""});setEditId(p.id);setShowForm(true);};
   const save=async ()=>{
     if(!form.name.trim()){toast("Nome obrigatório.","err");return;}
-    try {
-      if(editId){ await actions.updatePM(editId, form); toast("Atualizado!","ok"); }
-      else { await actions.createPM(form); toast("Cadastrado!","ok"); }
-    } catch(e) { toast("Erro ao salvar.","err"); console.error(e); return; }
+    if(editId){setDb(prev=>({...prev,payment_methods:prev.payment_methods.map(p=>p.id===editId?{...p,...form}:p)}));toast("Atualizado!","ok");}
+    else{setDb(prev=>({...prev,payment_methods:[...prev.payment_methods,{id:nid(prev.payment_methods),...form}]}));toast("Cadastrado!","ok");}
     setShowForm(false);
   };
-  const del=async p=>{
-    try { await actions.deletePM(p.id); toast("Excluído.","ok"); }
-    catch(e) { toast("Erro ao excluir.","err"); console.error(e); }
-  };
+  const del=p=>{setDb(prev=>({...prev,payment_methods:prev.payment_methods.filter(x=>x.id!==p.id)}));toast("Excluído.","ok");};
 
   return(
     <div>
@@ -4435,101 +4417,39 @@ function SalesHist({currentUser, db}) {
 
 // ─── APP ─────────────────────────────────────
 export default function App() {
-  const { user:sbUser, loading, data: sbData, actions } = useSupabase();
-  const [localUser, setLocalUser] = useState(null);
-  // Use Supabase user if available, fallback to local
-  const user = sbUser || localUser;
+  const [db,setDb]=useState(()=>loadDb()||SEED);
+  useEffect(()=>{ saveDb(db); },[db]);
+  const [user,setUser]=useState(null);
   const [page,setPage]=useState("dashboard");
   const [sbOpen,setSbOpen]=useState(false);
   const [notifOpen,setNotifOpen]=useState(false);
   const [toast,setToast]=useState(null);
   const [confirmReset,setConfirmReset]=useState(false);
-  const [globalDollarRate, setGlobalDollarRate] = useState("");
+  const [globalDollarRate,setGlobalDollarRate]=useState("");
 
-  // localStorage fallback — used when Supabase is not connected
-  const [localDb, setLocalDb] = useState(() => loadDb() || SEED);
-  useEffect(() => { if (!sbUser) saveDb(localDb); }, [localDb, sbUser]);
-
-  // Build db — Supabase data if logged in, localStorage otherwise
-  const db = sbUser ? {
-    quarries:        sbData.quarries || [],
-    users:           sbData.team || [],
-    blocks:          (sbData.blocks||[]).map(b => ({...b, photos: b.photos||[], created_at: b.created_at})),
-    clients:         sbData.clients || [],
-    payment_methods: sbData.payment_methods || [],
-    sales:           (sbData.sales||[]).map(s => ({...s, block_ids:(s.sale_blocks||[]).map(x=>x.block_id)})),
-    orders:          sbData.orders || [],
-    block_releases:  sbData.block_releases || [],
-    favorites:       sbData.favorites || [],
-    access_history:  [],
-    notifications:   sbData.notifications || [],
-  } : localDb;
-
-  // setDb — Supabase when connected, localStorage otherwise
-  const setDb = useCallback((updater) => {
-    if (sbUser) {
-      setTimeout(() => actions.reload(), 300);
-    } else {
-      setLocalDb(updater);
-    }
-  }, [sbUser, actions]);
-
-  // Dollar rate fetch
-  useEffect(() => {
-    const sources = [
-      { url: "https://api.allorigins.win/get?url=" + encodeURIComponent("https://economia.awesomeapi.com.br/json/last/USD-BRL"), parse: d => JSON.parse(d.contents).USDBRL.bid },
-      { url: "https://fxapi.app/api/latest?base=USD&symbols=BRL", parse: d => d.rates.BRL },
-      { url: "https://api.frankfurter.dev/v2/latest?base=USD&symbols=BRL", parse: d => d.rates.BRL },
+  useEffect(()=>{
+    const sources=[
+      {url:"https://api.allorigins.win/get?url="+encodeURIComponent("https://economia.awesomeapi.com.br/json/last/USD-BRL"),parse:d=>JSON.parse(d.contents).USDBRL.bid},
+      {url:"https://fxapi.app/api/latest?base=USD&symbols=BRL",parse:d=>d.rates.BRL},
+      {url:"https://api.frankfurter.dev/v2/latest?base=USD&symbols=BRL",parse:d=>d.rates.BRL},
     ];
-    (async () => {
-      for (const {url, parse} of sources) {
-        try {
-          const res = await fetch(url, {signal: AbortSignal.timeout(5000)});
-          if (!res.ok) continue;
-          const data = await res.json();
-          const val = parse(data);
-          if (val && !isNaN(parseFloat(val))) { setGlobalDollarRate(parseFloat(val).toFixed(2)); return; }
-        } catch { continue; }
+    (async()=>{
+      for(const {url,parse} of sources){
+        try{const res=await fetch(url,{signal:AbortSignal.timeout(5000)});if(!res.ok)continue;const data=await res.json();const val=parse(data);if(val&&!isNaN(parseFloat(val))){setGlobalDollarRate(parseFloat(val).toFixed(2));return;}}catch{continue;}
       }
     })();
-  }, []);
+  },[]);
 
   const showToast=useCallback((msg,type="")=>setToast({msg,type}),[]);
   const nav=p=>{setPage(p);setSbOpen(false);};
+  useEffect(()=>{if(user){const d={owner:"dashboard",foreman:"register",seller:"blocks",client:"catalog"};setPage(d[user.role]||"dashboard");}},[user]);
+  const fmFilter=useCallback(b=>Number(b.quarry_id)===Number(user?.quarry_id),[user?.quarry_id]);
 
-  useEffect(()=>{if(user){const d={owner:"dashboard",foreman:"register",seller:"blocks",client:"catalog"};setPage(d[user.role]||"dashboard");}}, [user]);
+  if(!user) return <LoginPage users={db.users} onLogin={setUser}/>;
 
-  const fmFilter=useCallback(b=>b.quarry_id===user?.quarry_id,[user?.quarry_id]);
-
-  // Loading screen — max 8 seconds then show login
-  const [loadTimeout, setLoadTimeout] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setLoadTimeout(true), 8000);
-    return () => clearTimeout(t);
-  }, []);
-
-  if (loading && !loadTimeout) return (
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0c1a2e"}}>
-      <div style={{textAlign:"center",color:"#fff"}}>
-        <div style={{fontFamily:"Sora,sans-serif",fontSize:28,fontWeight:800,marginBottom:12}}>Stone <span style={{color:"#60a5fa"}}>Block</span></div>
-        <div style={{color:"rgba(148,163,184,.6)",fontSize:14}}>Carregando...</div>
-      </div>
-    </div>
-  );
-
-  if(!user)return <LoginPage onLogin={async(em,pw)=>{
-  try {
-    await actions.signIn(em,pw);
-  } catch(e) {
-    // Fallback to local login
-    const u=(localDb.users||SEED.users).find(u=>u.email===em&&u.password===pw);
-    if(u) setLocalUser(u);
-    else throw e;
-  }
-}}/>;
-
-  const nc=db.notifications.filter(n=>n.user_id===user.id&&!n.read).length;
   const pc=db.orders.filter(o=>o.status==="pending").length;
+  const RL={owner:"Dono da Empresa",foreman:"Encarregado",seller:"Vendedor",client:"Cliente"};
+  const props={currentUser:user,quarries:db.quarries,db,setDb,toast:showToast,globalDollarRate};
 
   const NAV={
     owner:[{sec:"Gestão",items:[
@@ -4539,9 +4459,9 @@ export default function App() {
       {p:"orders",     l:"Pedidos",          i:"bell"},
       {p:"sales",      l:"Histórico Vendas", i:"hist"},
       {p:"share",      l:"Liberar Catálogo", i:"globe"},
-      {p:"quarries",   l:"Pedreiras",        i:"mtn"},
-      {p:"sellers",    l:"Vendedores",       i:"user"},
       {p:"commissions",l:"Comissões",         i:"dolar"},
+      {p:"quarries",   l:"Pedreiras",        i:"mtn"},
+      {p:"sellers",    l:"Equipe",           i:"user"},
       {p:"clients",    l:"Clientes",         i:"user"},
       {p:"payments",   l:"Pagamentos",       i:"card"},
     ]}],
@@ -4561,52 +4481,44 @@ export default function App() {
       {p:"payments",   l:"Pagamentos",       i:"card"},
     ]}],
     client:[{sec:"Compras",items:[
-      {p:"catalog",    l:"Catálogo",         i:"book"},
-      {p:"purchases",  l:"Minhas Compras",   i:"hist"},
-      {p:"orders",     l:"Pedidos de Interesse", i:"heart"},
+      {p:"catalog",    l:"Catálogo",               i:"book"},
+      {p:"purchases",  l:"Minhas Compras",         i:"hist"},
+      {p:"orders",     l:"Pedidos de Interesse",   i:"heart"},
     ]}],
   };
-  const RL={owner:"Dono da Empresa",foreman:"Encarregado",seller:"Vendedor",client:"Cliente"};
-  const props={currentUser:user,quarries:db.quarries,db,setDb,toast:showToast,globalDollarRate,actions};
 
   const renderPage=()=>{
     switch(page){
-      case "dashboard": return <Dash quarries={db.quarries} db={db}/>;
-      case "register":  return <Reg {...props}/>;
-      case "blocks":{
-        const cfg={
-          owner:  {title:"Blocos em Estoque",  sub:"Blocos disponíveis (excluindo vendidos)", bFilter:b=>b.status!=="sold"},
-          foreman:{title:"Blocos em Estoque",   sub:"Todos os blocos disponíveis",               bFilter:b=>b.status!=="sold"},
-          seller: {title:"Blocos em Estoque",   sub:"Todos os blocos disponíveis (excluindo vendidos)", bFilter:b=>b.status!=="sold"},
-        };
-        return <BList key={"blocks-"+user.role} {...props} {...(cfg[user.role]||{})} globalDollarRate={globalDollarRate}/>;
-      }
-      case "sold":     return <SoldBlocks key="sold" currentUser={user} quarries={db.quarries} db={db} setDb={setDb} toast={showToast}/>;
-      case "share":    return <ShareCatalog currentUser={user} quarries={db.quarries} db={db} setDb={setDb} toast={showToast}/>;
-      case "catalog":   return <Cat          key="catalog"    {...props}/>;
-      case "purchases": return <ClientPurchases key="purchases" currentUser={user} quarries={db.quarries} db={db}/>;
-      case "orders":   return <Ords     key="orders"   {...props}/>;
-      case "sales":    return <SalesHist currentUser={user} db={db}/>;
-      case "quarries": return <QuarriesPage db={db} setDb={setDb} toast={showToast}/>;
-      case "sellers":  return <SellersPage  db={db} setDb={setDb} toast={showToast} actions={actions}/>;
-      case "commissions": return <CommissionsPage db={db}/>;
-      case "clients":  return <ClientsPage db={db} setDb={setDb} toast={showToast} currentUser={user}/>;
-      case "payments": return <PaymentsPage db={db} setDb={setDb} toast={showToast} currentUser={user}/>;
-      default: return null;
+      case "dashboard":  return <Dash        key="dash"     {...props}/>;
+      case "register":   return <Reg         key="reg"      {...props}/>;
+      case "blocks":     return <BList key={"blocks-"+user.role} {...props} {...({owner:{title:"Blocos em Estoque"},foreman:{title:"Blocos em Estoque",bFilter:fmFilter},seller:{title:"Blocos em Estoque"},client:{title:"Blocos"}}[user.role]||{})} globalDollarRate={globalDollarRate}/>;
+      case "sold":       return <SoldBlocks  key="sold"     {...props}/>;
+      case "orders":     return <Ords        key="orders"   {...props}/>;
+      case "sales":      return <SalesHist   currentUser={user} db={db}/>;
+      case "share":      return <ShareCatalog currentUser={user} quarries={db.quarries} db={db} setDb={setDb} toast={showToast}/>;
+      case "commissions":return <CommissionsPage db={db}/>;
+      case "quarries":   return <QuarriesPage db={db} setDb={setDb} toast={showToast}/>;
+      case "sellers":    return <SellersPage  db={db} setDb={setDb} toast={showToast}/>;
+      case "clients":    return <ClientsPage  db={db} setDb={setDb} toast={showToast} currentUser={user}/>;
+      case "payments":   return <PaymentsPage db={db} setDb={setDb} toast={showToast} currentUser={user}/>;
+      case "catalog":    return <Cat          key="catalog"  {...props}/>;
+      case "purchases":  return <ClientPurchases key="purchases" currentUser={user} quarries={db.quarries} db={db}/>;
+      default:           return <Dash        key="dash"     {...props}/>;
     }
   };
 
-  return(
-    <><style>{CSS}</style>
+  return (<>
     <div className="app">
-      <div className="tb">
-        <div className="tbl">
-          <button className="hbtn" onClick={()=>setSbOpen(o=>!o)}><Icon n="menu" s={20} c="rgba(255,255,255,.7)"/></button>
-          <span className="tblogo">Stone <span>Block</span></span>
-          <span className="tbsub">Rochas Ornamentais</span>
-        </div>
-        <div className="tbr">
-          <button className="nbbtn" onClick={()=>setNotifOpen(s=>!s)}><Icon n="bell" s={20}/>{nc>0&&<span className="nbdot">{nc>9?"9+":nc}</span>}</button>
+      <div className="hdr">
+        <button className="hbtn" onClick={()=>setSbOpen(v=>!v)}><Icon n="menu" s={20}/></button>
+        <div className="hlogo">Stone <span>Block</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginLeft:"auto"}}>
+          <button className="hbtn" style={{position:"relative"}} onClick={()=>setNotifOpen(v=>!v)}>
+            <Icon n="bell" s={20}/>
+            {db.notifications.filter(n=>!n.read&&n.user_id===user.id).length>0&&(
+              <span className="nbadge">{db.notifications.filter(n=>!n.read&&n.user_id===user.id).length}</span>
+            )}
+          </button>
           <div className="av" title={`${user.name} — ${RL[user.role]}`}>{user.avatar}</div>
         </div>
       </div>
@@ -4629,7 +4541,7 @@ export default function App() {
               <div className="av" style={{width:34,height:34,fontSize:12}}>{user.avatar}</div>
               <div style={{flex:1,minWidth:0}}><div className="sbun">{user.name}</div><div className="sbur">{RL[user.role]}</div></div>
             </div>
-            <button className="lobtn" onClick={async()=>{ try{await actions.signOut();}catch(e){} setLocalUser(null); setSbOpen(false);}}><Icon n="out" s={14}/> Sair</button>
+            <button className="lobtn" onClick={()=>{setUser(null);setSbOpen(false);}}><Icon n="out" s={14}/> Sair</button>
             {user.role==="owner"&&(
               <button onClick={()=>setConfirmReset(true)} style={{width:"100%",marginTop:8,display:"flex",alignItems:"center",gap:8,padding:"7px 12px",background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.15)",borderRadius:8,color:"rgba(252,165,165,.55)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
                 🔄 Resetar dados de teste
@@ -4651,17 +4563,14 @@ export default function App() {
             <div className="mbody">
               <p style={{fontSize:14,lineHeight:1.6,marginBottom:12}}>Tem certeza que deseja apagar <strong>todos os dados</strong> e voltar ao estado inicial?</p>
               <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#92400e"}}>
-                ⚠️ Esta ação não pode ser desfeita. Todos os blocos, vendas e cadastros serão removidos.
+                ⚠️ Esta ação não pode ser desfeita.
               </div>
             </div>
             <div className="mfoot">
               <button className="btn bo" onClick={()=>setConfirmReset(false)}>Cancelar</button>
               <button className="btn br" onClick={()=>{
-                try { localStorage.removeItem(DB_KEY); } catch(e) {}
-                localStorage.clear();
-                sessionStorage.clear();
-                setConfirmReset(false);
-                window.location.reload();
+                try{localStorage.clear();}catch(e){}
+                setDb({...SEED});setUser(null);setSbOpen(false);setConfirmReset(false);
               }}>Confirmar Reset</button>
             </div>
           </div>
