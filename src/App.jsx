@@ -248,7 +248,7 @@ body{font-family:'Inter',sans-serif;background:#f8fafc;color:#111827;-webkit-fon
   border-right:1px solid rgba(255,255,255,.05);
 }
 .sb.open{transform:translateX(0);}
-@media(min-width:768px){.sb{transform:translateX(0);}.main{margin-left:240px;}}
+@media(min-width:768px){.sb{transform:translateX(0)!important;}.main{margin-left:240px;}}
 .sbov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:89;top:64px;backdrop-filter:blur(4px);}
 .sbov.show{display:block;}
 @media(min-width:768px){.sbov{display:none!important;}}
@@ -4421,7 +4421,7 @@ export default function App() {
   useEffect(()=>{ saveDb(db); },[db]);
   const [user,setUser]=useState(null);
   const [page,setPage]=useState("dashboard");
-  const [sbOpen,setSbOpen]=useState(false);
+  const [sbOpen,setSbOpen]=useState(typeof window!=='undefined'&&window.innerWidth>=768);
   const [notifOpen,setNotifOpen]=useState(false);
   const [toast,setToast]=useState(null);
   const [confirmReset,setConfirmReset]=useState(false);
