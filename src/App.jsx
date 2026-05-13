@@ -243,7 +243,7 @@ body{font-family:'Inter',sans-serif;background:#f8fafc;color:#111827;-webkit-fon
   background:rgba(10,15,30,.98);
   display:flex;flex-direction:column;
   position:fixed;top:64px;left:0;bottom:0;z-index:90;
-  transform:translateX(-100%);transition:transform var(--mid-t) var(--ease);
+  transform:translateX(-240px);transition:transform var(--mid-t) var(--ease);
   overflow-y:auto;
   border-right:1px solid rgba(255,255,255,.05);
 }
