@@ -4467,11 +4467,140 @@ export default function App() {
     notifications:   sbData.notifications,
   };
 
-  // setDb shim — maps old setDb pattern to Supabase actions
-  const setDb = useCallback((updaterOrObj) => {
-    // For compatibility — triggers a reload
-    actions.reload();
-  }, [actions]);
+  // Smart setDb — detects what changed and calls correct Supabase action
+  const setDb = useCallback((updater) => {
+    const prev = {
+      quarries:        sbData.quarries,
+      users:           sbData.team,
+      blocks:          sbData.blocks,
+      clients:         sbData.clients,
+      payment_methods: sbData.payment_methods,
+      sales:           sbData.sales,
+      orders:          sbData.orders,
+      block_releases:  sbData.block_releases,
+      favorites:       sbData.favorites,
+      access_history:  [],
+      notifications:   sbData.notifications,
+    };
+
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    if (!next) return;
+
+    // ── Detect and sync each changed table ──────────────────────────
+
+    // BLOCKS
+    if (next.blocks !== prev.blocks) {
+      const prevIds = new Set(prev.blocks.map(b => b.id));
+      const nextIds = new Set(next.blocks.map(b => b.id));
+      // Deleted
+      prev.blocks.filter(b => !nextIds.has(b.id)).forEach(b => actions.deleteBlock(b.id).catch(console.error));
+      // Added
+      next.blocks.filter(b => !prevIds.has(b.id)).forEach(b => {
+        const { id, sys_code, quarry, reserved_client, ...rest } = b;
+        actions.createBlock(rest).catch(console.error);
+      });
+      // Updated
+      next.blocks.filter(b => prevIds.has(b.id)).forEach(b => {
+        const old = prev.blocks.find(x => x.id === b.id);
+        if (JSON.stringify(old) !== JSON.stringify(b)) {
+          const { id, sys_code, company_id, created_by, created_at, updated_at, quarry, reserved_client, ...rest } = b;
+          actions.updateBlock(b.id, rest).catch(console.error);
+        }
+      });
+    }
+
+    // QUARRIES
+    if (next.quarries !== prev.quarries) {
+      const prevIds = new Set(prev.quarries.map(q => q.id));
+      const nextIds = new Set(next.quarries.map(q => q.id));
+      prev.quarries.filter(q => !nextIds.has(q.id)).forEach(q => actions.deleteQuarry(q.id).catch(console.error));
+      next.quarries.filter(q => !prevIds.has(q.id)).forEach(q => {
+        const { id, company_id, created_at, ...rest } = q;
+        actions.createQuarry(rest).catch(console.error);
+      });
+      next.quarries.filter(q => prevIds.has(q.id)).forEach(q => {
+        const old = prev.quarries.find(x => x.id === q.id);
+        if (JSON.stringify(old) !== JSON.stringify(q)) {
+          const { id, company_id, created_at, ...rest } = q;
+          actions.updateQuarry(q.id, rest).catch(console.error);
+        }
+      });
+    }
+
+    // CLIENTS
+    if (next.clients !== prev.clients) {
+      const prevIds = new Set(prev.clients.map(c => c.id));
+      const nextIds = new Set(next.clients.map(c => c.id));
+      prev.clients.filter(c => !nextIds.has(c.id)).forEach(c => actions.deleteClient(c.id).catch(console.error));
+      next.clients.filter(c => !prevIds.has(c.id)).forEach(c => {
+        const { id, company_id, created_at, ...rest } = c;
+        actions.createClient(rest).catch(console.error);
+      });
+      next.clients.filter(c => prevIds.has(c.id)).forEach(c => {
+        const old = prev.clients.find(x => x.id === c.id);
+        if (JSON.stringify(old) !== JSON.stringify(c)) {
+          const { id, company_id, created_at, ...rest } = c;
+          actions.updateClient(c.id, rest).catch(console.error);
+        }
+      });
+    }
+
+    // PAYMENT METHODS
+    if (next.payment_methods !== prev.payment_methods) {
+      const prevIds = new Set(prev.payment_methods.map(p => p.id));
+      const nextIds = new Set(next.payment_methods.map(p => p.id));
+      prev.payment_methods.filter(p => !nextIds.has(p.id)).forEach(p => actions.deletePM(p.id).catch(console.error));
+      next.payment_methods.filter(p => !prevIds.has(p.id)).forEach(p => {
+        const { id, company_id, created_at, ...rest } = p;
+        actions.createPM(rest).catch(console.error);
+      });
+      next.payment_methods.filter(p => prevIds.has(p.id)).forEach(p => {
+        const old = prev.payment_methods.find(x => x.id === p.id);
+        if (JSON.stringify(old) !== JSON.stringify(p)) {
+          const { id, company_id, created_at, ...rest } = p;
+          actions.updatePM(p.id, rest).catch(console.error);
+        }
+      });
+    }
+
+    // ORDERS
+    if (next.orders !== prev.orders) {
+      const prevIds = new Set(prev.orders.map(o => o.id));
+      next.orders.filter(o => !prevIds.has(o.id)).forEach(o => {
+        const { id, company_id, created_at, block, client, ...rest } = o;
+        actions.createOrder(rest).catch(console.error);
+      });
+      next.orders.filter(o => prevIds.has(o.id)).forEach(o => {
+        const old = prev.orders.find(x => x.id === o.id);
+        if (JSON.stringify(old) !== JSON.stringify(o)) {
+          const { id, company_id, created_at, block, client, ...rest } = o;
+          actions.updateOrder(o.id, rest).catch(console.error);
+        }
+      });
+    }
+
+    // BLOCK RELEASES
+    if (next.block_releases !== prev.block_releases) {
+      const prevKeys = new Set(prev.block_releases.map(r => r.block_id+'_'+r.client_id));
+      const nextKeys = new Set(next.block_releases.map(r => r.block_id+'_'+r.client_id));
+      prev.block_releases.filter(r => !nextKeys.has(r.block_id+'_'+r.client_id))
+        .forEach(r => actions.revokeRelease(r.block_id, r.client_id).catch(console.error));
+      next.block_releases.filter(r => !prevKeys.has(r.block_id+'_'+r.client_id))
+        .forEach(r => actions.releaseBlock(r.block_id, r.client_id).catch(console.error));
+    }
+
+    // NOTIFICATIONS (mark read)
+    if (next.notifications !== prev.notifications) {
+      next.notifications.filter(n => {
+        const old = prev.notifications.find(x => x.id === n.id);
+        return old && !old.read && n.read;
+      }).forEach(n => actions.markRead(n.id).catch(console.error));
+    }
+
+    // SALES (handle via actions.createSale / reverseSale directly in components)
+    // Reload after any change
+    setTimeout(() => actions.reload(), 500);
+  }, [sbData, actions]);
 
   // Dollar rate fetch
   useEffect(() => {
