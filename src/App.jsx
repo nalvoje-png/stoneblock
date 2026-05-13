@@ -4510,14 +4510,16 @@ export default function App() {
   return (<>
     <style>{CSS}</style>
     <div className="app">
-      <div className="hdr">
-        <button className="hbtn" onClick={()=>setSbOpen(v=>!v)}><Icon n="menu" s={20}/></button>
-        <div className="hlogo">Stone <span>Block</span></div>
-        <div style={{display:"flex",alignItems:"center",gap:10,marginLeft:"auto"}}>
-          <button className="hbtn" style={{position:"relative"}} onClick={()=>setNotifOpen(v=>!v)}>
+      <div className="tb">
+        <div className="tbl">
+          <button className="hbtn" onClick={()=>setSbOpen(v=>!v)}><Icon n="menu" s={20}/></button>
+          <div className="tblogo">Stone <span>Block</span></div>
+        </div>
+        <div className="tbr">
+          <button className="nbbtn" onClick={()=>setNotifOpen(v=>!v)}>
             <Icon n="bell" s={20}/>
             {db.notifications.filter(n=>!n.read&&n.user_id===user.id).length>0&&(
-              <span className="nbadge">{db.notifications.filter(n=>!n.read&&n.user_id===user.id).length}</span>
+              <span className="nbdot">{db.notifications.filter(n=>!n.read&&n.user_id===user.id).length}</span>
             )}
           </button>
           <div className="av" title={`${user.name} — ${RL[user.role]}`}>{user.avatar}</div>
