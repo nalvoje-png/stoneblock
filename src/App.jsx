@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useSupabase } from "./hooks/useSupabase";
+import { supabase } from "./supabase";
 
 // ─── SEED ────────────────────────────────────
 const SEED = {
@@ -678,9 +680,15 @@ const RC = {
 };
 
 // ─── LOGIN ────────────────────────────────────
-function LoginPage({users, onLogin}) {
+function LoginPage({onLogin}) {
   const [em,setEm]=useState(""); const [pw,setPw]=useState(""); const [vis,setVis]=useState(false); const [err,setErr]=useState("");
-  const go=()=>{const u=users.find(u=>u.email===em&&u.password===pw);if(u)onLogin(u);else setErr("E-mail ou senha inválidos.");};
+  const go=async()=>{
+    try {
+      await onLogin(em, pw);
+    } catch(e) {
+      setErr("E-mail ou senha inválidos. Verifique suas credenciais.");
+    }
+  };
   return (
     <><style>{LCSS}</style>
     <div className="lroot">
@@ -717,21 +725,10 @@ function LoginPage({users, onLogin}) {
           <button className="lbtn" onClick={go}><Icon n="lock" s={17} c="rgba(255,255,255,.9)"/>Acessar Sistema</button>
         </div>
         <div className="ldemo">
-          <div className="ldsep"><div style={{height:1,flex:1,background:"rgba(99,179,237,.1)"}}/><div className="ldtit">Acesso Rápido — Demo</div><div style={{height:1,flex:1,background:"rgba(99,179,237,.1)"}}/></div>
-          <div className="ldsub">Experimente com usuários de demonstração</div>
-          <div className="ldgrid">
-            {["owner","foreman","seller","client"].map(role=>{
-              const u=users.find(u=>u.role===role);
-              if(!u) return null;
-              const r=RC[role];const sel=em===u.email;
-              return(
-                <div key={role} className="ldcard" style={{borderColor:sel?r.border:"rgba(99,179,237,.1)",background:sel?r.bg:undefined}} onClick={()=>{setEm(u.email);setPw(u.password);setErr("");}}>
-                  <div className="ldicon" style={{background:r.bg,border:`1px solid ${r.border}`}}><span style={{fontSize:20}}>{r.icon}</span></div>
-                  <div className="ldrl" style={{color:r.color}}>{r.label}</div>
-                  <div className="ldeml">{u.email}</div>
-                  <div className="ldsel" style={{color:r.color,borderColor:r.border,background:sel?r.bg:"transparent"}}>{sel?"✓ Selecionado":"Acessar demo"}</div>
-                </div>);
-            })}
+          <div className="ldsep"><div style={{height:1,flex:1,background:"rgba(99,179,237,.1)"}}/><div className="ldtit">Acesso ao Sistema</div><div style={{height:1,flex:1,background:"rgba(99,179,237,.1)"}}/></div>
+          <div className="ldsub">Use seu e-mail e senha cadastrados</div>
+          <div style={{background:"rgba(10,25,55,.4)",border:"1px solid rgba(99,179,237,.1)",borderRadius:12,padding:"16px",fontSize:13,color:"rgba(148,163,184,.7)",textAlign:"center"}}>
+            Digite seu e-mail e senha para acessar o sistema.
           </div>
         </div>
         <div className="lfooter">
@@ -4431,35 +4428,67 @@ function SalesHist({currentUser, db}) {
 
 // ─── APP ─────────────────────────────────────
 export default function App() {
-  // Load from localStorage on first render; fall back to SEED if empty
-  const [db,setDb]=useState(()=>loadDb()||SEED);
-
-  // Persist every db change to localStorage
-  useEffect(()=>{ saveDb(db); },[db]);
-  const [user,setUser]=useState(null);
+  const { user, loading, data: sbData, actions } = useSupabase();
   const [page,setPage]=useState("dashboard");
   const [sbOpen,setSbOpen]=useState(false);
   const [notifOpen,setNotifOpen]=useState(false);
   const [toast,setToast]=useState(null);
   const [confirmReset,setConfirmReset]=useState(false);
-
   const [globalDollarRate, setGlobalDollarRate] = useState("");
 
-  // Try to fetch dollar rate once on app load
+  // Build db object compatible with existing components
+  const db = {
+    quarries:        sbData.quarries,
+    users:           sbData.team,
+    blocks:          sbData.blocks.map(b => ({
+      ...b,
+      quarry_id:   b.quarry_id,
+      reserved_for: b.reserved_for,
+      photos:      b.photos || [],
+      created_at:  b.created_at,
+    })),
+    clients:         sbData.clients,
+    payment_methods: sbData.payment_methods,
+    sales:           sbData.sales.map(s => ({
+      ...s,
+      block_ids:          (s.sale_blocks||[]).map(sb=>sb.block_id),
+      seller_id:          s.seller_id,
+      client_id:          s.client_id,
+      payment_method_id:  s.payment_method_id,
+    })),
+    orders:          sbData.orders.map(o => ({
+      ...o,
+      block_id:   o.block_id,
+      client_id:  o.client_id,
+    })),
+    block_releases:  sbData.block_releases,
+    favorites:       sbData.favorites,
+    access_history:  [],
+    notifications:   sbData.notifications,
+  };
+
+  // setDb shim — maps old setDb pattern to Supabase actions
+  const setDb = useCallback((updaterOrObj) => {
+    // For compatibility — triggers a reload
+    actions.reload();
+  }, [actions]);
+
+  // Dollar rate fetch
   useEffect(() => {
-    const proxies = [
-      () => fetch("https://api.allorigins.win/get?url=" + encodeURIComponent("https://economia.awesomeapi.com.br/json/last/USD-BRL"))
-              .then(r=>r.json()).then(j=>parseFloat(JSON.parse(j.contents).USDBRL.bid).toFixed(2)),
-      () => fetch("https://corsproxy.io/?url=" + encodeURIComponent("https://economia.awesomeapi.com.br/json/last/USD-BRL"))
-              .then(r=>r.json()).then(d=>parseFloat(d.USDBRL.bid).toFixed(2)),
-      () => fetch("https://fxapi.app/api/latest?base=USD&symbols=BRL")
-              .then(r=>r.json()).then(d=>parseFloat(d.rates.BRL).toFixed(2)),
-      () => fetch("https://api.frankfurter.dev/v2/latest?base=USD&symbols=BRL")
-              .then(r=>r.json()).then(d=>parseFloat(d.rates.BRL).toFixed(2)),
+    const sources = [
+      { url: "https://api.allorigins.win/get?url=" + encodeURIComponent("https://economia.awesomeapi.com.br/json/last/USD-BRL"), parse: d => JSON.parse(d.contents).USDBRL.bid },
+      { url: "https://fxapi.app/api/latest?base=USD&symbols=BRL", parse: d => d.rates.BRL },
+      { url: "https://api.frankfurter.dev/v2/latest?base=USD&symbols=BRL", parse: d => d.rates.BRL },
     ];
     (async () => {
-      for (const fn of proxies) {
-        try { const r = await fn(); if(r && !isNaN(r)){ setGlobalDollarRate(r); return; } } catch {}
+      for (const {url, parse} of sources) {
+        try {
+          const res = await fetch(url, {signal: AbortSignal.timeout(5000)});
+          if (!res.ok) continue;
+          const data = await res.json();
+          const val = parse(data);
+          if (val && !isNaN(parseFloat(val))) { setGlobalDollarRate(parseFloat(val).toFixed(2)); return; }
+        } catch { continue; }
       }
     })();
   }, []);
@@ -4469,9 +4498,19 @@ export default function App() {
 
   useEffect(()=>{if(user){const d={owner:"dashboard",foreman:"register",seller:"blocks",client:"catalog"};setPage(d[user.role]||"dashboard");}}, [user]);
 
-  const fmFilter=useCallback(b=>Number(b.quarry_id)===Number(user?.quarry_id),[user?.quarry_id]);
+  const fmFilter=useCallback(b=>b.quarry_id===user?.quarry_id,[user?.quarry_id]);
 
-  if(!user)return <LoginPage users={db.users} onLogin={setUser}/>;
+  // Loading screen
+  if (loading) return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0c1a2e"}}>
+      <div style={{textAlign:"center",color:"#fff"}}>
+        <div style={{fontFamily:"Sora,sans-serif",fontSize:28,fontWeight:800,marginBottom:12}}>Stone <span style={{color:"#60a5fa"}}>Block</span></div>
+        <div style={{color:"rgba(148,163,184,.6)",fontSize:14}}>Carregando...</div>
+      </div>
+    </div>
+  );
+
+  if(!user)return <LoginPage onLogin={async(em,pw)=>{ await actions.signIn(em,pw); }}/>;
 
   const nc=db.notifications.filter(n=>n.user_id===user.id&&!n.read).length;
   const pc=db.orders.filter(o=>o.status==="pending").length;
@@ -4574,7 +4613,7 @@ export default function App() {
               <div className="av" style={{width:34,height:34,fontSize:12}}>{user.avatar}</div>
               <div style={{flex:1,minWidth:0}}><div className="sbun">{user.name}</div><div className="sbur">{RL[user.role]}</div></div>
             </div>
-            <button className="lobtn" onClick={()=>{setUser(null);setSbOpen(false);}}><Icon n="out" s={14}/> Sair</button>
+            <button className="lobtn" onClick={async()=>{await actions.signOut();setSbOpen(false);}}><Icon n="out" s={14}/> Sair</button>
             {user.role==="owner"&&(
               <button onClick={()=>setConfirmReset(true)} style={{width:"100%",marginTop:8,display:"flex",alignItems:"center",gap:8,padding:"7px 12px",background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.15)",borderRadius:8,color:"rgba(252,165,165,.55)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
                 🔄 Resetar dados de teste
