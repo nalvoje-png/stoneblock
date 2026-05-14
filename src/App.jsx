@@ -766,14 +766,31 @@ function BlocksPage({ profile, blocks, quarries, onChange, toast }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="fg"><label className="fl">Código *</label><input className="fc" value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} placeholder="Ex: VMC-001" /></div>
                 <div className="fg"><label className="fl">Pedreira *</label>
-                  <select className="fc" value={form.quarry_id} onChange={e => setForm({ ...form, quarry_id: e.target.value })}>
+                  <select className="fc" value={form.quarry_id} onChange={e => setForm({ ...form, quarry_id: e.target.value, material: '' })}>
                     <option value="">Selecione...</option>
                     {quarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
                   </select>
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12 }}>
-                <div className="fg"><label className="fl">Material *</label><input className="fc" value={form.material} onChange={e => setForm({ ...form, material: e.target.value })} placeholder="Ex: Granito Verde" /></div>
+                <div className="fg"><label className="fl">Material *</label>
+                  {(() => {
+                    const selectedQuarry = quarries.find(q => q.id === form.quarry_id)
+                    const materials = selectedQuarry?.materials || []
+                    if (!form.quarry_id) {
+                      return <input className="fc" disabled placeholder="Selecione uma pedreira primeiro" style={{ background: 'var(--haze)', color: 'var(--mist)' }} />
+                    }
+                    if (materials.length === 0) {
+                      return <input className="fc" disabled placeholder="Pedreira sem materiais cadastrados" style={{ background: 'var(--haze)', color: 'var(--mist)' }} />
+                    }
+                    return (
+                      <select className="fc" value={form.material} onChange={e => setForm({ ...form, material: e.target.value })}>
+                        <option value="">Selecione o material...</option>
+                        {materials.map(m => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                    )
+                  })()}
+                </div>
                 <div className="fg"><label className="fl">Classificação</label>
                   <select className="fc" value={form.classification} onChange={e => setForm({ ...form, classification: e.target.value })}>
                     <option>A</option><option>B</option><option>C</option><option>D</option>
