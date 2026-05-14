@@ -737,9 +737,11 @@ function BlocksPage({ profile, blocks, quarries, onChange, toast }) {
             const q = quarries.find(x => x.id === b.quarry_id)
             return (
               <div key={b.id} className="card">
-                {b.photos && b.photos.length > 0
-                  ? <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 160, objectFit: 'cover' }} />
-                  : <div style={{ height: 100, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>}
+                {b.photos && b.photos.length > 0 && b.photos[0]
+                  ? <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 160, objectFit: 'cover', background: 'var(--haze)' }} onError={(e) => { e.target.style.display = 'none'; e.target.nextElementSibling.style.display = 'flex' }} />
+                  : null}
+                {(!b.photos || !b.photos.length || !b.photos[0]) && <div style={{ height: 100, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>}
+                <div style={{ height: 100, background: 'var(--haze)', display: 'none', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
                 <div className="cb">
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                     <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15 }}>{b.code}</div>
@@ -903,35 +905,65 @@ export default function App() {
     }
   }, [showToast])
 
-  // Init session
+  // Init session — with timeout to never hang forever
   useEffect(() => {
     let mounted = true
+
+    // Safety timeout: if anything takes >6s, show login
+    const timeoutId = setTimeout(() => {
+      if (mounted) {
+        console.warn('Init timeout — showing login')
+        setLoading(false)
+      }
+    }, 6000)
+
     const init = async () => {
       try {
-        const session = await api.getSession()
+        const session = await Promise.race([
+          api.getSession(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('Session timeout')), 5000))
+        ])
         if (session?.user && mounted) {
           const p = await api.ensureProfile(session.user.id, session.user.email)
+          if (!mounted) return
           setProfile(p)
           await loadData(p)
         }
-      } catch (e) { console.error('init:', e) }
-      finally { if (mounted) setLoading(false) }
+      } catch (e) {
+        console.error('init error:', e)
+      } finally {
+        if (mounted) {
+          clearTimeout(timeoutId)
+          setLoading(false)
+        }
+      }
     }
     init()
 
     const { data: { subscription } } = api.onAuthChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user && mounted) {
-        const p = await api.ensureProfile(session.user.id, session.user.email)
-        setProfile(p)
-        await loadData(p)
-        setLoading(false)
+      if (!mounted) return
+      if (event === 'SIGNED_IN' && session?.user) {
+        try {
+          const p = await api.ensureProfile(session.user.id, session.user.email)
+          if (!mounted) return
+          setProfile(p)
+          await loadData(p)
+        } catch (e) {
+          console.error('SIGNED_IN error:', e)
+        } finally {
+          if (mounted) setLoading(false)
+        }
       }
-      if (event === 'SIGNED_OUT' && mounted) {
+      if (event === 'SIGNED_OUT') {
         setProfile(null); setBlocks([]); setQuarries([]); setClients([]); setPayments([])
       }
     })
 
-    return () => { mounted = false; subscription.unsubscribe() }
+    return () => {
+      mounted = false
+      clearTimeout(timeoutId)
+      subscription.unsubscribe()
+    }
   }, [loadData])
 
   const handleLogout = async () => {

@@ -190,7 +190,13 @@ export async function listBlocks(profile) {
     .eq('company_id', getCompanyId(profile))
     .order('created_at', { ascending: false })
   if (error) throw error
-  return data || []
+  // Normalize photos: ensure it's always an array
+  return (data || []).map(b => ({
+    ...b,
+    photos: Array.isArray(b.photos) ? b.photos
+          : typeof b.photos === 'string' ? (b.photos.startsWith('[') ? JSON.parse(b.photos) : [b.photos])
+          : []
+  }))
 }
 
 export async function createBlock(profile, payload) {
