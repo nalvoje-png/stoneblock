@@ -192,10 +192,11 @@ function LoginPage({ onLogin }) {
     setLoading(true); setErr('')
     try {
       await api.signIn(email, password)
-      onLogin()
+      // Don't reset loading - onAuthChange will handle the transition
+      // If something goes wrong, timeout will release
+      setTimeout(() => setLoading(false), 8000)
     } catch (e) {
       setErr('E-mail ou senha inválidos.')
-    } finally {
       setLoading(false)
     }
   }
@@ -945,10 +946,15 @@ export default function App() {
           new Promise((_, rej) => setTimeout(() => rej(new Error('Session timeout')), 5000))
         ])
         if (session?.user && mounted) {
-          const p = await api.ensureProfile(session.user.id, session.user.email)
+          const p = await Promise.race([
+            api.ensureProfile(session.user.id, session.user.email),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('Profile timeout')), 5000))
+          ])
           if (!mounted) return
+          // Set profile IMMEDIATELY so the user sees the app
           setProfile(p)
-          await loadData(p)
+          // Load data in background
+          loadData(p).catch(err => console.error('loadData background:', err))
         }
       } catch (e) {
         console.error('init error:', e)
@@ -963,20 +969,31 @@ export default function App() {
 
     const { data: { subscription } } = api.onAuthChange(async (event, session) => {
       if (!mounted) return
+      console.log('Auth event:', event)
       if (event === 'SIGNED_IN' && session?.user) {
         try {
-          const p = await api.ensureProfile(session.user.id, session.user.email)
+          const p = await Promise.race([
+            api.ensureProfile(session.user.id, session.user.email),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('Profile timeout')), 5000))
+          ])
           if (!mounted) return
+          // Set profile IMMEDIATELY so user sees the app
           setProfile(p)
-          await loadData(p)
+          setLoading(false)
+          // Load data in background — don't block
+          loadData(p).catch(err => console.error('loadData background:', err))
         } catch (e) {
           console.error('SIGNED_IN error:', e)
-        } finally {
           if (mounted) setLoading(false)
         }
       }
       if (event === 'SIGNED_OUT') {
         setProfile(null); setBlocks([]); setQuarries([]); setClients([]); setPayments([])
+        setLoading(false)
+      }
+      if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+        // Just make sure loading is off
+        if (mounted) setLoading(false)
       }
     })
 
