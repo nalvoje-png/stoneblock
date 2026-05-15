@@ -180,7 +180,7 @@ const ROLE_LABEL = { owner: 'Dono', foreman: 'Encarregado', seller: 'Vendedor', 
 // ═══════════════════════════════════════════════════════════════
 // LOGIN PAGE
 // ═══════════════════════════════════════════════════════════════
-function LoginPage({ onLogin }) {
+function LoginPage({ onLoginSuccess }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -191,12 +191,15 @@ function LoginPage({ onLogin }) {
     if (!email || !password) { setErr('Informe e-mail e senha.'); return }
     setLoading(true); setErr('')
     try {
-      await api.signIn(email, password)
-      // Don't reset loading - onAuthChange will handle the transition
-      // If something goes wrong, timeout will release
-      setTimeout(() => setLoading(false), 8000)
+      const result = await api.signIn(email, password)
+      console.log('Login OK:', result.user?.email)
+      // Get profile right after signIn
+      const p = await api.ensureProfile(result.user.id, result.user.email)
+      console.log('Profile OK:', p.name)
+      onLoginSuccess(p)
     } catch (e) {
-      setErr('E-mail ou senha inválidos.')
+      console.error('Login error:', e)
+      setErr(e.message?.includes('Invalid') ? 'E-mail ou senha inválidos.' : 'Erro: ' + e.message)
       setLoading(false)
     }
   }
@@ -927,75 +930,48 @@ export default function App() {
     }
   }, [showToast])
 
-  // Init session — no aggressive timeouts, just let Supabase work
+  // Simple init — check session once, no callbacks, no events
   useEffect(() => {
     let mounted = true
-
-    // Safety net: if NOTHING happens in 15 seconds, show login anyway
-    const safetyTimeoutId = setTimeout(() => {
-      if (mounted) {
-        console.warn('Safety timeout — releasing loading')
-        setLoading(false)
-      }
-    }, 15000)
-
     const init = async () => {
       try {
         const session = await api.getSession()
         if (session?.user && mounted) {
-          console.log('Found session, loading profile...')
-          const p = await api.ensureProfile(session.user.id, session.user.email)
-          if (!mounted) return
-          console.log('Profile loaded:', p.name)
-          setProfile(p)
-          // Load data in background — don't block the UI
-          loadData(p).catch(err => console.error('loadData background:', err))
+          console.log('Found session for:', session.user.email)
+          try {
+            const p = await api.ensureProfile(session.user.id, session.user.email)
+            if (!mounted) return
+            console.log('Profile loaded')
+            setProfile(p)
+            // Load data in background — don't wait
+            loadData(p).catch(err => console.error('loadData:', err))
+          } catch (e) {
+            console.error('Profile error:', e)
+          }
         } else {
-          console.log('No active session')
+          console.log('No session, showing login')
         }
       } catch (e) {
-        console.error('init error:', e)
+        console.error('Init error:', e)
       } finally {
-        if (mounted) {
-          clearTimeout(safetyTimeoutId)
-          setLoading(false)
-        }
+        if (mounted) setLoading(false)
       }
     }
     init()
+    return () => { mounted = false }
+  }, [loadData])
 
-    const { data: { subscription } } = api.onAuthChange(async (event, session) => {
-      if (!mounted) return
-      console.log('Auth event:', event)
-      if (event === 'SIGNED_IN' && session?.user) {
-        try {
-          const p = await api.ensureProfile(session.user.id, session.user.email)
-          if (!mounted) return
-          console.log('Profile loaded on signin:', p.name)
-          setProfile(p)
-          setLoading(false)
-          loadData(p).catch(err => console.error('loadData background:', err))
-        } catch (e) {
-          console.error('SIGNED_IN error:', e)
-          if (mounted) setLoading(false)
-        }
-      }
-      if (event === 'SIGNED_OUT') {
-        setProfile(null); setBlocks([]); setQuarries([]); setClients([]); setPayments([])
-        setLoading(false)
-      }
-    })
-
-    return () => {
-      mounted = false
-      clearTimeout(safetyTimeoutId)
-      subscription.unsubscribe()
-    }
+  // Handler for successful login - called by LoginPage directly
+  const handleLoginSuccess = useCallback(async (newProfile) => {
+    console.log('Login success, setting profile')
+    setProfile(newProfile)
+    loadData(newProfile).catch(err => console.error('loadData:', err))
   }, [loadData])
 
   const handleLogout = async () => {
-    await api.signOut()
+    try { await api.signOut() } catch (e) { console.error(e) }
     setProfile(null)
+    setBlocks([]); setQuarries([]); setClients([]); setPayments([])
   }
 
   if (loading) return (
@@ -1019,7 +995,7 @@ export default function App() {
   if (!profile) return (
     <>
       <style>{CSS}</style>
-      <LoginPage onLogin={() => {}} />
+      <LoginPage onLoginSuccess={handleLoginSuccess} />
     </>
   )
 
