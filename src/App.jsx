@@ -626,11 +626,14 @@ function PaymentsPage({ profile, payments, onChange, toast }) {
 // ═══════════════════════════════════════════════════════════════
 // BLOCKS
 // ═══════════════════════════════════════════════════════════════
-function BlocksPage({ profile, blocks, quarries, onChange, toast }) {
+function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, toast }) {
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState(null)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [selectedIds, setSelectedIds] = useState([])
+  const [showSaleModal, setShowSaleModal] = useState(false)
+  const [filterStatus, setFilterStatus] = useState('available')
 
   const emptyForm = {
     code: '', quarry_id: '', material: '', classification: 'A',
@@ -743,25 +746,70 @@ function BlocksPage({ profile, blocks, quarries, onChange, toast }) {
   const STATUS_CLR = { produced: '#64748b', available: '#10b981', reserved: '#f59e0b', sold: '#ef4444' }
   const STATUS_LBL = { produced: 'Produzido', available: 'Disponível', reserved: 'Reservado', sold: 'Vendido' }
 
+  // Filter blocks by status
+  const filteredBlocks = blocks.filter(b => !filterStatus || b.status === filterStatus)
+
+  // Selection logic
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+  const clearSelection = () => setSelectedIds([])
+  const selectedBlocks = blocks.filter(b => selectedIds.includes(b.id))
+
   return (
     <div>
       <div className="ph">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div>
             <div className="ptit">Blocos</div>
-            <div className="psub">{blocks.length} bloco(s) cadastrado(s)</div>
+            <div className="psub">{filteredBlocks.length} bloco(s) · {blocks.length} total</div>
           </div>
-          <button className="btn bb" onClick={openNew}><Icon n="plus" s={16} c="#fff" /> Novo Bloco</button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {selectedIds.length > 0 && (profile.role === 'owner' || profile.role === 'seller') && (
+              <>
+                <button className="btn bg" onClick={() => setShowSaleModal(true)}>
+                  <Icon n="cart" s={16} c="#fff" /> Vender {selectedIds.length} bloco(s)
+                </button>
+                <button className="btn bo" onClick={clearSelection}>
+                  <Icon n="x" s={14} /> Limpar
+                </button>
+              </>
+            )}
+            {(profile.role === 'owner' || profile.role === 'foreman') && (
+              <button className="btn bb" onClick={openNew}><Icon n="plus" s={16} c="#fff" /> Novo Bloco</button>
+            )}
+          </div>
         </div>
       </div>
 
-      {blocks.length === 0
-        ? <div className="es"><div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div><div className="estit">Nenhum bloco cadastrado</div></div>
+      {/* Status filter */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+        {[
+          { v: '', l: 'Todos', cnt: blocks.length },
+          { v: 'available', l: 'Disponíveis', cnt: blocks.filter(b => b.status === 'available').length },
+          { v: 'reserved', l: 'Reservados', cnt: blocks.filter(b => b.status === 'reserved').length },
+          { v: 'sold', l: 'Vendidos', cnt: blocks.filter(b => b.status === 'sold').length },
+        ].map(f => (
+          <button key={f.v} className={'btn ' + (filterStatus === f.v ? 'bb' : 'bo') + ' bsm'} onClick={() => setFilterStatus(f.v)}>
+            {f.l} ({f.cnt})
+          </button>
+        ))}
+      </div>
+
+      {filteredBlocks.length === 0
+        ? <div className="es"><div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div><div className="estit">Nenhum bloco {filterStatus ? STATUS_LBL[filterStatus].toLowerCase() : 'cadastrado'}</div></div>
         : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 14 }}>
-          {blocks.map(b => {
+          {filteredBlocks.map(b => {
             const q = quarries.find(x => x.id === b.quarry_id)
+            const isSelected = selectedIds.includes(b.id)
+            const canSell = b.status === 'available' && (profile.role === 'owner' || profile.role === 'seller')
             return (
-              <div key={b.id} className="card">
+              <div key={b.id} className="card" style={{ position: 'relative', ...(isSelected && { boxShadow: '0 0 0 3px var(--sap5)', borderColor: 'var(--sap5)' }) }}>
+                {canSell && (
+                  <div onClick={() => toggleSelect(b.id)} style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, width: 28, height: 28, background: isSelected ? 'var(--sap6)' : 'rgba(255,255,255,.9)', border: '2px solid ' + (isSelected ? 'var(--sap6)' : 'var(--fog)'), borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                    {isSelected && <Icon n="check" s={14} c="#fff" />}
+                  </div>
+                )}
                 {b.photos && b.photos.length > 0 && b.photos[0]
                   ? <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 160, objectFit: 'cover', background: 'var(--haze)' }} onError={(e) => { e.target.style.display = 'none'; e.target.nextElementSibling.style.display = 'flex' }} />
                   : null}
@@ -776,14 +824,35 @@ function BlocksPage({ profile, blocks, quarries, onChange, toast }) {
                   <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 10 }}>📍 {q?.name || '—'} · Vol. {(b.net_volume || 0).toFixed(2)} m³</div>
                   <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, color: 'var(--sap7)', marginBottom: 10 }}>{money(b.total_value, b.currency)}</div>
                   <div style={{ display: 'flex', gap: 6 }}>
-                    <button className="btn bo bsm" onClick={() => openEdit(b)}><Icon n="edit" s={13} /> Editar</button>
-                    <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => del(b)}><Icon n="trash" s={13} c="var(--err)" /></button>
+                    {(profile.role === 'owner' || profile.role === 'foreman') && (
+                      <>
+                        <button className="btn bo bsm" onClick={() => openEdit(b)}><Icon n="edit" s={13} /> Editar</button>
+                        <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => del(b)}><Icon n="trash" s={13} c="var(--err)" /></button>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
             )
           })}
         </div>}
+
+      {/* Sale modal */}
+      {showSaleModal && (
+        <SaleModal
+          profile={profile}
+          selectedBlocks={selectedBlocks}
+          clients={clients}
+          payments={payments}
+          onClose={() => setShowSaleModal(false)}
+          onSuccess={async () => {
+            setShowSaleModal(false)
+            clearSelection()
+            await onChange()
+          }}
+          toast={toast}
+        />
+      )}
 
       {showForm && (
         <div className="mo" onClick={() => setShowForm(false)}>
@@ -894,6 +963,299 @@ function BlocksPage({ profile, blocks, quarries, onChange, toast }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// SALE MODAL — registrar venda de blocos selecionados
+// ═══════════════════════════════════════════════════════════════
+function SaleModal({ profile, selectedBlocks, clients, payments, onClose, onSuccess, toast }) {
+  const [clientId, setClientId] = useState('')
+  const [paymentId, setPaymentId] = useState('')
+  const [dollarRate, setDollarRate] = useState('')
+  const [obs, setObs] = useState('')
+  const [loadingRate, setLoadingRate] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  // Calculate totals
+  const hasUSD = selectedBlocks.some(b => b.currency === 'USD')
+  const totalBRL = selectedBlocks
+    .filter(b => b.currency === 'BRL')
+    .reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+  const totalUSDBlocks = selectedBlocks
+    .filter(b => b.currency === 'USD')
+    .reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+  const usdAsBRL = dollarRate ? totalUSDBlocks * Number(dollarRate) : 0
+  const grandTotalBRL = totalBRL + usdAsBRL
+
+  // Fetch dollar quote
+  const fetchDollar = async () => {
+    setLoadingRate(true)
+    const sources = [
+      { url: 'https://api.allorigins.win/get?url=' + encodeURIComponent('https://economia.awesomeapi.com.br/json/last/USD-BRL'),
+        parse: d => JSON.parse(d.contents).USDBRL.bid },
+      { url: 'https://api.frankfurter.dev/v2/latest?base=USD&symbols=BRL',
+        parse: d => d.rates.BRL },
+    ]
+    for (const { url, parse } of sources) {
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
+        if (!res.ok) continue
+        const data = await res.json()
+        const val = parse(data)
+        if (val && !isNaN(parseFloat(val))) {
+          setDollarRate(parseFloat(val).toFixed(4))
+          toast(`Cotação: R$ ${parseFloat(val).toFixed(2)}`, 'ok')
+          setLoadingRate(false)
+          return
+        }
+      } catch { continue }
+    }
+    toast('Erro ao buscar cotação. Informe manualmente.', 'err')
+    setLoadingRate(false)
+  }
+
+  const save = async () => {
+    if (!clientId) { toast('Selecione um cliente.', 'err'); return }
+    if (hasUSD && !dollarRate) { toast('Informe a cotação do dólar.', 'err'); return }
+    setSaving(true)
+    try {
+      await api.createSale(profile, {
+        client_id: clientId,
+        payment_method_id: paymentId || null,
+        dollar_rate: dollarRate ? Number(dollarRate) : null,
+        total_brl: grandTotalBRL,
+        total_usd: totalUSDBlocks,
+        obs: obs.trim() || null,
+      }, selectedBlocks.map(b => b.id))
+      toast('Venda registrada com sucesso!', 'ok')
+      onSuccess()
+    } catch (e) {
+      console.error('Sale error:', e)
+      toast('Erro: ' + e.message, 'err')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div className="mtit">Registrar Venda</div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          {/* Selected blocks summary */}
+          <div style={{ background: 'var(--haze)', padding: 14, borderRadius: 8, marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 10 }}>
+              {selectedBlocks.length} bloco(s) selecionado(s)
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {selectedBlocks.map(b => (
+                <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+                  <span><strong>{b.code}</strong> — {b.material} ({(b.net_volume || 0).toFixed(2)} m³)</span>
+                  <span style={{ fontWeight: 700, color: 'var(--sap7)' }}>{money(b.total_value, b.currency)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="fg">
+              <label className="fl">Cliente *</label>
+              <select className="fc" value={clientId} onChange={e => setClientId(e.target.value)}>
+                <option value="">Selecione...</option>
+                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="fg">
+              <label className="fl">Forma de Pagamento</label>
+              <select className="fc" value={paymentId} onChange={e => setPaymentId(e.target.value)}>
+                <option value="">Sem forma definida</option>
+                {payments.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {hasUSD && (
+            <div className="fg">
+              <label className="fl">Cotação do Dólar (R$ por US$) *</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="fc" type="number" step="0.0001" value={dollarRate} onChange={e => setDollarRate(e.target.value)} placeholder="Ex: 5.20" />
+                <button className="btn bo bsm" onClick={fetchDollar} disabled={loadingRate}>
+                  {loadingRate ? <span className="spinner"></span> : <Icon n="trend" s={14} />} Buscar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Totals */}
+          <div style={{ background: 'var(--sap1)', padding: 16, borderRadius: 10, marginBottom: 16 }}>
+            {totalBRL > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
+                <span>Total R$:</span><strong>{money(totalBRL, 'BRL')}</strong>
+              </div>
+            )}
+            {totalUSDBlocks > 0 && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
+                  <span>Total US$:</span><strong>{money(totalUSDBlocks, 'USD')}</strong>
+                </div>
+                {dollarRate && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--mist)', marginBottom: 6 }}>
+                    <span>US$ convertido (R$):</span><span>{money(usdAsBRL, 'BRL')}</span>
+                  </div>
+                )}
+              </>
+            )}
+            <div style={{ borderTop: '1px solid var(--sap2)', paddingTop: 8, marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: 'var(--sap7)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Total Geral (R$):</span>
+              <span style={{ fontFamily: 'Sora,sans-serif', fontSize: 22, fontWeight: 800, color: 'var(--sap7)' }}>{money(grandTotalBRL, 'BRL')}</span>
+            </div>
+          </div>
+
+          <div className="fg">
+            <label className="fl">Observações</label>
+            <textarea className="fc" value={obs} onChange={e => setObs(e.target.value)} placeholder="Condições, prazo de entrega, etc." />
+          </div>
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose}>Cancelar</button>
+          <button className="btn bg" onClick={save} disabled={saving}>
+            {saving ? <><span className="spinner"></span> Registrando...</> : <><Icon n="check" s={14} c="#fff" /> Confirmar Venda</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SALES HISTORY PAGE
+// ═══════════════════════════════════════════════════════════════
+function SalesPage({ profile, sales, blocks, onChange, toast }) {
+  const [dtInicio, setDtInicio] = useState('')
+  const [dtFim, setDtFim] = useState('')
+  const [filterClient, setFilterClient] = useState('')
+
+  const today = new Date().toISOString().slice(0, 10)
+
+  // Filtered sales
+  const filtered = sales.filter(s => {
+    const d = new Date(s.created_at)
+    if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
+    if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+    if (filterClient && s.client?.name?.toLowerCase().indexOf(filterClient.toLowerCase()) === -1) return false
+    return true
+  })
+
+  const totalBRL = filtered.reduce((a, s) => a + (Number(s.total_brl) || 0), 0)
+  const totalUSD = filtered.reduce((a, s) => a + (Number(s.total_usd) || 0), 0)
+  const totalBlocks = filtered.reduce((a, s) => a + (s.block_ids?.length || 0), 0)
+
+  const reverse = async (sale) => {
+    if (!window.confirm(`Estornar a venda #${String(sale.id).slice(0, 8)}? Os blocos voltarão a ficar disponíveis.`)) return
+    try {
+      await api.reverseSale(sale.id, sale.block_ids || [])
+      await onChange()
+      toast('Venda estornada.', 'ok')
+    } catch (e) {
+      toast('Erro ao estornar: ' + e.message, 'err')
+    }
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">Histórico de Vendas</div>
+        <div className="psub">{filtered.length} venda(s)</div>
+      </div>
+
+      {/* Stats */}
+      <div className="sg">
+        <div className="sc">
+          <div className="sico" style={{ background: '#dcfce7' }}><Icon n="trend" s={20} c="#059669" /></div>
+          <div className="sval" style={{ fontSize: 22 }}>{money(totalBRL, 'BRL')}</div>
+          <div className="slbl2">Total em R$</div>
+        </div>
+        <div className="sc" style={{ borderTopColor: '#3b82f6' }}>
+          <div className="sico" style={{ background: '#dbeafe' }}><Icon n="dolar" s={20} c="#2563eb" /></div>
+          <div className="sval" style={{ fontSize: 22 }}>{money(totalUSD, 'USD')}</div>
+          <div className="slbl2">Total em US$</div>
+        </div>
+        <div className="sc" style={{ borderTopColor: 'var(--warn)' }}>
+          <div className="sico" style={{ background: '#fef3c7' }}><Icon n="cube" s={20} c="#d97706" /></div>
+          <div className="sval">{totalBlocks}</div>
+          <div className="slbl2">Blocos Vendidos</div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="cb" style={{ padding: '14px 18px' }}>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label className="fl" style={{ margin: 0 }}>De</label>
+              <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} max={dtFim || today} onChange={e => setDtInicio(e.target.value)} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label className="fl" style={{ margin: 0 }}>Até</label>
+              <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} min={dtInicio} max={today} onChange={e => setDtFim(e.target.value)} />
+            </div>
+            <input className="fc" style={{ fontSize: 13, padding: '7px 12px', flex: '1 1 180px' }} placeholder="Buscar cliente..." value={filterClient} onChange={e => setFilterClient(e.target.value)} />
+            {(dtInicio || dtFim || filterClient) && (
+              <button className="btn bo bsm" onClick={() => { setDtInicio(''); setDtFim(''); setFilterClient('') }}>
+                <Icon n="x" s={13} /> Limpar
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Sales list */}
+      {filtered.length === 0
+        ? <div className="es"><div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cart" s={48} /></div><div className="estit">Nenhuma venda encontrada</div></div>
+        : <div className="card"><div className="tw"><table>
+          <thead><tr>
+            <th>Data</th>
+            <th>Cliente</th>
+            <th>Blocos</th>
+            {profile.role !== 'seller' && <th>Vendedor</th>}
+            <th>Total R$</th>
+            <th>Total US$</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            {filtered.map(s => (
+              <tr key={s.id}>
+                <td style={{ fontSize: 13, color: 'var(--mist)' }}>{fmtDate(s.created_at)}</td>
+                <td style={{ fontWeight: 600 }}>{s.client?.name || '—'}</td>
+                <td>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {(s.blocks || []).map(b => (
+                      <span key={b.id} style={{ fontSize: 12 }}>
+                        <strong style={{ color: 'var(--sap7)' }}>{b.code}</strong>
+                        <span style={{ color: 'var(--mist)', marginLeft: 4 }}>· {b.material}</span>
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                {profile.role !== 'seller' && <td style={{ fontSize: 13 }}>{s.seller?.name || '—'}</td>}
+                <td style={{ fontWeight: 700, color: '#059669' }}>{s.total_brl > 0 ? money(s.total_brl, 'BRL') : '—'}</td>
+                <td style={{ fontWeight: 700, color: 'var(--sap7)' }}>{s.total_usd > 0 ? money(s.total_usd, 'USD') : '—'}</td>
+                <td>
+                  {(profile.role === 'owner' || profile.role === 'seller') && (
+                    <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => reverse(s)} title="Estornar">
+                      <Icon n="trash" s={13} c="var(--err)" />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div></div>}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════
 export default function App() {
@@ -907,6 +1269,7 @@ export default function App() {
   const [clients,  setClients]    = useState([])
   const [payments, setPayments]   = useState([])
   const [blocks,   setBlocks]     = useState([])
+  const [sales,    setSales]      = useState([])
 
   const showToast = useCallback((msg, type = '') => {
     setToast({ msg, type })
@@ -917,13 +1280,14 @@ export default function App() {
   const loadData = useCallback(async (p) => {
     if (!p) return
     try {
-      const [q, c, pm, b] = await Promise.all([
+      const [q, c, pm, b, s] = await Promise.all([
         api.listQuarries(p),
         api.listClients(p),
         api.listPaymentMethods(p),
         api.listBlocks(p),
+        api.listSales(p),
       ])
-      setQuarries(q); setClients(c); setPayments(pm); setBlocks(b)
+      setQuarries(q); setClients(c); setPayments(pm); setBlocks(b); setSales(s)
     } catch (e) {
       console.error('loadData error:', e)
       showToast('Erro ao carregar dados: ' + e.message, 'err')
@@ -987,7 +1351,7 @@ export default function App() {
   const handleLogout = async () => {
     try { await api.signOut() } catch (e) { console.error(e) }
     setProfile(null)
-    setBlocks([]); setQuarries([]); setClients([]); setPayments([])
+    setBlocks([]); setQuarries([]); setClients([]); setPayments([]); setSales([])
   }
 
   if (loading) return (
@@ -1018,6 +1382,7 @@ export default function App() {
   const NAV = [
     { p: 'dashboard', l: 'Dashboard',   i: 'grid' },
     { p: 'blocks',    l: 'Blocos',      i: 'cube' },
+    { p: 'sales',     l: 'Vendas',      i: 'cart' },
     { p: 'quarries',  l: 'Pedreiras',   i: 'mtn' },
     { p: 'clients',   l: 'Clientes',    i: 'user' },
     { p: 'payments',  l: 'Pagamentos',  i: 'card' },
@@ -1026,7 +1391,8 @@ export default function App() {
   const renderPage = () => {
     switch (page) {
       case 'dashboard': return <Dashboard blocks={blocks} quarries={quarries} clients={clients} />
-      case 'blocks':    return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
+      case 'blocks':    return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
+      case 'sales':     return <SalesPage profile={profile} sales={sales} blocks={blocks} onChange={() => loadData(profile)} toast={showToast} />
       case 'quarries':  return <QuarriesPage profile={profile} quarries={quarries} blocks={blocks} onChange={() => loadData(profile)} toast={showToast} />
       case 'clients':   return <ClientsPage profile={profile} clients={clients} onChange={() => loadData(profile)} toast={showToast} />
       case 'payments':  return <PaymentsPage profile={profile} payments={payments} onChange={() => loadData(profile)} toast={showToast} />

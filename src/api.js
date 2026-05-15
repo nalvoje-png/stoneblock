@@ -234,6 +234,84 @@ export async function deleteBlock(id) {
   if (error) throw error
 }
 
+// ─── SALES ──────────────────────────────────────────────────────
+export async function listSales(profile) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+  // Sellers só veem suas próprias vendas
+  let query = supabase
+    .from('sales')
+    .select(`
+      *,
+      seller:profiles!seller_id(id, name, avatar),
+      client:clients!client_id(id, name, country),
+      payment_method:payment_methods!payment_method_id(id, name),
+      sale_blocks(block_id, block:blocks(id, code, material, net_volume, total_value, currency, photos, classification))
+    `)
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false })
+
+  if (profile.role === 'seller') {
+    query = query.eq('seller_id', profile.id)
+  }
+
+  const { data, error } = await query
+  if (error) throw error
+  // Normalize sale_blocks → block_ids array for easy use
+  return (data || []).map(s => ({
+    ...s,
+    block_ids: (s.sale_blocks || []).map(sb => sb.block_id),
+    blocks: (s.sale_blocks || []).map(sb => sb.block).filter(Boolean),
+  }))
+}
+
+export async function createSale(profile, saleData, blockIds) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+
+  // 1. Create the sale
+  const { data: sale, error: saleError } = await supabase
+    .from('sales')
+    .insert({
+      company_id: companyId,
+      seller_id: saleData.seller_id || profile.id,
+      client_id: saleData.client_id,
+      payment_method_id: saleData.payment_method_id || null,
+      dollar_rate: saleData.dollar_rate || null,
+      total_brl: saleData.total_brl || 0,
+      total_usd: saleData.total_usd || 0,
+      obs: saleData.obs || null,
+    })
+    .select()
+    .single()
+
+  if (saleError) throw saleError
+
+  // 2. Link blocks to sale
+  if (blockIds && blockIds.length > 0) {
+    const saleBlocks = blockIds.map(bid => ({ sale_id: sale.id, block_id: bid }))
+    const { error: linkError } = await supabase.from('sale_blocks').insert(saleBlocks)
+    if (linkError) throw linkError
+
+    // 3. Mark blocks as sold
+    const { error: blockError } = await supabase
+      .from('blocks')
+      .update({ status: 'sold' })
+      .in('id', blockIds)
+    if (blockError) throw blockError
+  }
+
+  return sale
+}
+
+export async function reverseSale(saleId, blockIds) {
+  // Restore blocks to available
+  if (blockIds && blockIds.length > 0) {
+    await supabase.from('blocks').update({ status: 'available' }).in('id', blockIds)
+  }
+  // Delete sale (sale_blocks cascade)
+  const { error } = await supabase.from('sales').delete().eq('id', saleId)
+  if (error) throw error
+}
+
 // ─── PHOTO UPLOAD ──────────────────────────────────────────────
 export async function uploadBlockPhoto(profile, file, blockCode) {
   // Sanitize: only safe characters in filename
@@ -279,6 +357,9 @@ export function subscribeRealtime(profile, onChange) {
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'payment_methods', filter: `company_id=eq.${companyId}` },
         () => onChange('payment_methods'))
+    .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'sales', filter: `company_id=eq.${companyId}` },
+        () => onChange('sales'))
     .subscribe()
 
   return channel
