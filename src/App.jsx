@@ -927,40 +927,37 @@ export default function App() {
     }
   }, [showToast])
 
-  // Init session — with timeout to never hang forever
+  // Init session — no aggressive timeouts, just let Supabase work
   useEffect(() => {
     let mounted = true
 
-    // Safety timeout: if anything takes >6s, show login
-    const timeoutId = setTimeout(() => {
+    // Safety net: if NOTHING happens in 15 seconds, show login anyway
+    const safetyTimeoutId = setTimeout(() => {
       if (mounted) {
-        console.warn('Init timeout — showing login')
+        console.warn('Safety timeout — releasing loading')
         setLoading(false)
       }
-    }, 6000)
+    }, 15000)
 
     const init = async () => {
       try {
-        const session = await Promise.race([
-          api.getSession(),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('Session timeout')), 5000))
-        ])
+        const session = await api.getSession()
         if (session?.user && mounted) {
-          const p = await Promise.race([
-            api.ensureProfile(session.user.id, session.user.email),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('Profile timeout')), 5000))
-          ])
+          console.log('Found session, loading profile...')
+          const p = await api.ensureProfile(session.user.id, session.user.email)
           if (!mounted) return
-          // Set profile IMMEDIATELY so the user sees the app
+          console.log('Profile loaded:', p.name)
           setProfile(p)
-          // Load data in background
+          // Load data in background — don't block the UI
           loadData(p).catch(err => console.error('loadData background:', err))
+        } else {
+          console.log('No active session')
         }
       } catch (e) {
         console.error('init error:', e)
       } finally {
         if (mounted) {
-          clearTimeout(timeoutId)
+          clearTimeout(safetyTimeoutId)
           setLoading(false)
         }
       }
@@ -972,15 +969,11 @@ export default function App() {
       console.log('Auth event:', event)
       if (event === 'SIGNED_IN' && session?.user) {
         try {
-          const p = await Promise.race([
-            api.ensureProfile(session.user.id, session.user.email),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('Profile timeout')), 5000))
-          ])
+          const p = await api.ensureProfile(session.user.id, session.user.email)
           if (!mounted) return
-          // Set profile IMMEDIATELY so user sees the app
+          console.log('Profile loaded on signin:', p.name)
           setProfile(p)
           setLoading(false)
-          // Load data in background — don't block
           loadData(p).catch(err => console.error('loadData background:', err))
         } catch (e) {
           console.error('SIGNED_IN error:', e)
@@ -991,15 +984,11 @@ export default function App() {
         setProfile(null); setBlocks([]); setQuarries([]); setClients([]); setPayments([])
         setLoading(false)
       }
-      if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
-        // Just make sure loading is off
-        if (mounted) setLoading(false)
-      }
     })
 
     return () => {
       mounted = false
-      clearTimeout(timeoutId)
+      clearTimeout(safetyTimeoutId)
       subscription.unsubscribe()
     }
   }, [loadData])
@@ -1015,7 +1004,13 @@ export default function App() {
       <div className="loading-screen">
         <div style={{ textAlign: 'center' }}>
           <div className="spinner"></div>
-          <div>Carregando Stone Block...</div>
+          <div style={{ marginBottom: 20 }}>Carregando Stone Block...</div>
+          <button
+            className="btn bo bsm"
+            style={{ background: 'rgba(255,255,255,.1)', color: '#fff', borderColor: 'rgba(255,255,255,.2)' }}
+            onClick={() => setLoading(false)}>
+            Ir para login
+          </button>
         </div>
       </div>
     </>
