@@ -1256,12 +1256,480 @@ function SalesPage({ profile, sales, blocks, onChange, toast }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// TEAM PAGE — gerenciar encarregados, vendedores e clientes
+// ═══════════════════════════════════════════════════════════════
+function TeamPage({ profile, team, onChange, toast }) {
+  const [editingId, setEditingId] = useState(null)
+  const [editForm, setEditForm] = useState({ name: '', phone: '', role: '', commission: false, commission_pct: '' })
+  const [saving, setSaving] = useState(false)
+
+  const sellers = team.filter(t => t.role === 'seller')
+  const foremen = team.filter(t => t.role === 'foreman')
+  const clientUsers = team.filter(t => t.role === 'client')
+
+  const RL2 = { seller: 'Vendedor', foreman: 'Encarregado', client: 'Cliente' }
+
+  const openEdit = (u) => {
+    setEditForm({
+      name: u.name || '',
+      phone: u.phone || '',
+      role: u.role || 'seller',
+      commission: u.commission || false,
+      commission_pct: u.commission_pct || '',
+    })
+    setEditingId(u.id)
+  }
+
+  const save = async () => {
+    if (!editForm.name.trim()) { toast('Nome obrigatório.', 'err'); return }
+    setSaving(true)
+    try {
+      await api.updateTeamMember(editingId, {
+        name: editForm.name.trim(),
+        phone: editForm.phone.trim() || null,
+        role: editForm.role,
+        commission: editForm.commission,
+        commission_pct: editForm.commission ? parseFloat(editForm.commission_pct) || 0 : 0,
+        avatar: editForm.name.trim().split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
+      })
+      await onChange()
+      toast('Atualizado!', 'ok')
+      setEditingId(null)
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">Equipe</div>
+        <div className="psub">{team.length} membro(s) · {foremen.length} encarregado(s) · {sellers.length} vendedor(es) · {clientUsers.length} cliente(s)</div>
+      </div>
+
+      <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 'var(--r-md)', padding: '14px 18px', marginBottom: 20, fontSize: 13, color: '#1e40af' }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>➕ Como adicionar novos membros</div>
+        <div style={{ lineHeight: 1.7 }}>
+          <strong>1.</strong> Acesse <strong>supabase.com</strong> → seu projeto → <strong>Authentication → Users</strong><br />
+          <strong>2.</strong> Clique em <strong>"Add user" → "Create new user"</strong> → informe e-mail e senha<br />
+          <strong>3.</strong> O usuário será criado e aparecerá nesta lista automaticamente<br />
+          <strong>4.</strong> Aqui você define o nome, telefone, função e percentual de comissão
+        </div>
+      </div>
+
+      {team.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="user" s={48} /></div>
+          <div className="estit">Nenhum membro além de você</div>
+          <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>Siga as instruções acima para adicionar.</div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {team.map(u => (
+            <div key={u.id} className="card">
+              <div className="cb">
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+                  <div className="av" style={{ width: 52, height: 52, fontSize: 16, flexShrink: 0 }}>
+                    {u.avatar || u.name?.substring(0, 2).toUpperCase() || '??'}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                      <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{u.name}</div>
+                      <span className="bdg" style={{
+                        background: u.role === 'foreman' ? '#fef3c7' : u.role === 'seller' ? '#dbeafe' : '#dcfce7',
+                        color: u.role === 'foreman' ? '#92400e' : u.role === 'seller' ? '#1e40af' : '#15803d',
+                      }}>{RL2[u.role] || u.role}</span>
+                      {u.commission && u.commission_pct > 0 && (
+                        <span className="bdg" style={{ background: '#fef9c3', color: '#854d0e' }}>
+                          {u.commission_pct}% comissão
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--mist)' }}>{u.phone || 'Sem telefone cadastrado'}</div>
+                  </div>
+                  <button className="btn bo bsm" onClick={() => openEdit(u)}>
+                    <Icon n="edit" s={13} /> Editar
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Edit modal */}
+      {editingId && (
+        <div className="mo" onClick={() => setEditingId(null)}>
+          <div className="md" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div className="mtit">Editar Membro</div>
+              <button className="btn bo bsm" onClick={() => setEditingId(null)}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              <div className="fg"><label className="fl">Nome *</label>
+                <input className="fc" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
+              </div>
+              <div className="fg"><label className="fl">Telefone / WhatsApp</label>
+                <input className="fc" value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} placeholder="+55 27 99999-0000" />
+              </div>
+              <div className="fg"><label className="fl">Função</label>
+                <select className="fc" value={editForm.role} onChange={e => setEditForm({ ...editForm, role: e.target.value })}>
+                  <option value="foreman">Encarregado (cadastra e edita blocos)</option>
+                  <option value="seller">Vendedor (vende blocos)</option>
+                  <option value="client">Cliente (vê o catálogo)</option>
+                </select>
+              </div>
+              {editForm.role === 'seller' && (
+                <div className="fg">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 8 }} onClick={() => setEditForm({ ...editForm, commission: !editForm.commission })}>
+                    <div style={{ width: 20, height: 20, borderRadius: 5, border: '2px solid', display: 'flex', alignItems: 'center', justifyContent: 'center', borderColor: editForm.commission ? 'var(--sap6)' : 'var(--fog)', background: editForm.commission ? 'var(--sap6)' : 'transparent' }}>
+                      {editForm.commission && <Icon n="check" s={12} c="#fff" />}
+                    </div>
+                    <label className="fl" style={{ cursor: 'pointer', margin: 0 }}>Recebe comissão sobre vendas</label>
+                  </div>
+                  {editForm.commission && (
+                    <input className="fc" type="number" min="0" max="100" step="0.5" value={editForm.commission_pct} onChange={e => setEditForm({ ...editForm, commission_pct: e.target.value })} placeholder="Ex: 5 (significa 5%)" />
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={() => setEditingId(null)}>Cancelar</button>
+              <button className="btn bb" onClick={save} disabled={saving}>
+                {saving ? <><span className="spinner"></span> Salvando</> : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RELEASES PAGE — liberar catálogo de blocos para clientes
+// ═══════════════════════════════════════════════════════════════
+function ReleasesPage({ profile, blocks, clients, releases, onChange, toast }) {
+  const [step, setStep] = useState(1) // 1=blocos, 2=clientes, 3=confirmar
+  const [selectedBlocks, setSelectedBlocks] = useState([])
+  const [selectedClients, setSelectedClients] = useState([])
+  const [showReleaseFlow, setShowReleaseFlow] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const availableBlocks = blocks.filter(b => b.status === 'available' || b.status === 'reserved')
+
+  // Map of block_id => Set of client_ids that already have access
+  const releaseMap = {}
+  releases.forEach(r => {
+    if (!releaseMap[r.block_id]) releaseMap[r.block_id] = new Set()
+    releaseMap[r.block_id].add(r.client_id)
+  })
+
+  const startFlow = () => { setStep(1); setSelectedBlocks([]); setSelectedClients([]); setShowReleaseFlow(true) }
+  const closeFlow = () => setShowReleaseFlow(false)
+
+  const toggleBlock = (id) => setSelectedBlocks(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  const toggleClient = (id) => setSelectedClients(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+
+  const confirm = async () => {
+    setSaving(true)
+    try {
+      await api.releaseBlocks(profile, selectedBlocks, selectedClients)
+      await onChange()
+      toast(`${selectedBlocks.length} bloco(s) liberado(s) para ${selectedClients.length} cliente(s)`, 'ok')
+      setShowReleaseFlow(false)
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setSaving(false) }
+  }
+
+  const revoke = async (blockId, clientId) => {
+    if (!window.confirm('Revogar este acesso?')) return
+    try {
+      await api.revokeRelease(blockId, clientId)
+      await onChange()
+      toast('Acesso revogado.', 'ok')
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="ptit">Liberar Catálogo</div>
+            <div className="psub">{releases.length} liberação(ões) ativa(s)</div>
+          </div>
+          <button className="btn bb" onClick={startFlow}>
+            <Icon n="plus" s={16} c="#fff" /> Nova Liberação
+          </button>
+        </div>
+      </div>
+
+      {releases.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
+          <div className="estit">Nenhum bloco liberado para clientes</div>
+          <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>Clique em "Nova Liberação" para começar.</div>
+        </div>
+      ) : (
+        <div className="card"><div className="tw"><table>
+          <thead><tr>
+            <th>Bloco</th><th>Cliente</th><th>Liberado por</th><th>Data</th><th></th>
+          </tr></thead>
+          <tbody>
+            {releases.map(r => {
+              const b = blocks.find(x => x.id === r.block_id)
+              return (
+                <tr key={r.id}>
+                  <td>
+                    <strong style={{ color: 'var(--sap7)' }}>{b?.code || '—'}</strong>
+                    <span style={{ color: 'var(--mist)', marginLeft: 6, fontSize: 13 }}>{b?.material}</span>
+                  </td>
+                  <td style={{ fontWeight: 600 }}>{r.client?.name || '—'}</td>
+                  <td style={{ fontSize: 13 }}>{r.liberador?.name || '—'}</td>
+                  <td style={{ fontSize: 13, color: 'var(--mist)' }}>{fmtDate(r.data_liberacao)}</td>
+                  <td>
+                    <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => revoke(r.block_id, r.client_id)}>
+                      <Icon n="trash" s={13} c="var(--err)" /> Revogar
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table></div></div>
+      )}
+
+      {/* Release flow modal */}
+      {showReleaseFlow && (
+        <div className="mo" onClick={closeFlow}>
+          <div className="md" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div className="mtit">Nova Liberação — Passo {step}/3</div>
+              <button className="btn bo bsm" onClick={closeFlow}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              {step === 1 && (
+                <>
+                  <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 14 }}>Selecione os blocos que deseja liberar:</div>
+                  {availableBlocks.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 30, color: 'var(--mist)' }}>Nenhum bloco disponível</div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: 10, maxHeight: 400, overflowY: 'auto' }}>
+                      {availableBlocks.map(b => {
+                        const sel = selectedBlocks.includes(b.id)
+                        return (
+                          <div key={b.id} onClick={() => toggleBlock(b.id)} style={{ border: '2px solid ' + (sel ? 'var(--sap6)' : 'var(--fog)'), background: sel ? 'var(--sap1)' : '#fff', borderRadius: 8, padding: 10, cursor: 'pointer' }}>
+                            <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--sap7)' }}>{b.code}</div>
+                            <div style={{ fontSize: 11, color: 'var(--mist)' }}>{b.material}</div>
+                            <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4 }}>{money(b.total_value, b.currency)}</div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {step === 2 && (
+                <>
+                  <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 14 }}>Selecione os clientes que terão acesso:</div>
+                  {clients.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 30, color: 'var(--mist)' }}>Nenhum cliente cadastrado</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 400, overflowY: 'auto' }}>
+                      {clients.map(c => {
+                        const sel = selectedClients.includes(c.id)
+                        return (
+                          <div key={c.id} onClick={() => toggleClient(c.id)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 10, border: '2px solid ' + (sel ? 'var(--sap6)' : 'var(--fog)'), background: sel ? 'var(--sap1)' : '#fff', borderRadius: 8, cursor: 'pointer' }}>
+                            <div style={{ width: 20, height: 20, borderRadius: 4, border: '2px solid', borderColor: sel ? 'var(--sap6)' : 'var(--fog)', background: sel ? 'var(--sap6)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {sel && <Icon n="check" s={12} c="#fff" />}
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 600 }}>{c.name}</div>
+                              <div style={{ fontSize: 12, color: 'var(--mist)' }}>{c.country} {c.email && '· ' + c.email}</div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {step === 3 && (
+                <div>
+                  <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 14 }}>Confirme a liberação:</div>
+                  <div style={{ background: 'var(--sap1)', padding: 16, borderRadius: 10, marginBottom: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--sap7)', marginBottom: 8 }}>Blocos ({selectedBlocks.length})</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {selectedBlocks.map(id => {
+                        const b = blocks.find(x => x.id === id)
+                        return <span key={id} className="bdg" style={{ background: 'var(--sap2)', color: 'var(--sap7)' }}>{b?.code}</span>
+                      })}
+                    </div>
+                  </div>
+                  <div style={{ background: '#dcfce7', padding: 16, borderRadius: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: '#15803d', marginBottom: 8 }}>Clientes ({selectedClients.length})</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {selectedClients.map(id => {
+                        const c = clients.find(x => x.id === id)
+                        return <span key={id} className="bdg" style={{ background: '#86efac', color: '#15803d' }}>{c?.name}</span>
+                      })}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 14, textAlign: 'center' }}>
+                    Total: {selectedBlocks.length * selectedClients.length} liberação(ões) serão criadas
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={closeFlow}>Cancelar</button>
+              {step > 1 && <button className="btn bo" onClick={() => setStep(step - 1)}>Voltar</button>}
+              {step < 3 ? (
+                <button
+                  className="btn bb"
+                  onClick={() => setStep(step + 1)}
+                  disabled={(step === 1 && selectedBlocks.length === 0) || (step === 2 && selectedClients.length === 0)}>
+                  Próximo
+                </button>
+              ) : (
+                <button className="btn bg" onClick={confirm} disabled={saving}>
+                  {saving ? <><span className="spinner"></span> Liberando</> : <><Icon n="check" s={14} c="#fff" /> Confirmar Liberação</>}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CLIENT CATALOG — visão do cliente, vê blocos liberados para ele
+// ═══════════════════════════════════════════════════════════════
+function CatalogPage({ profile, catalog, toast }) {
+  const [selected, setSelected] = useState(null)
+
+  const STATUS_LBL = { available: 'Disponível', reserved: 'Reservado' }
+  const STATUS_CLR = { available: '#10b981', reserved: '#f59e0b' }
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">Catálogo</div>
+        <div className="psub">{catalog.length} bloco(s) disponível(is) para você</div>
+      </div>
+
+      {catalog.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
+          <div className="estit">Nenhum bloco disponível ainda</div>
+          <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>
+            Quando blocos forem liberados para você, aparecerão aqui.
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 14 }}>
+          {catalog.map(b => (
+            <div key={b.id} className="card" style={{ cursor: 'pointer' }} onClick={() => setSelected(b)}>
+              {b.photos && b.photos.length > 0 && b.photos[0] ? (
+                <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 200, objectFit: 'cover', background: 'var(--haze)' }} />
+              ) : (
+                <div style={{ height: 200, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon n="cube" s={40} c="var(--mist)" />
+                </div>
+              )}
+              <div className="cb">
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15 }}>{b.code}</div>
+                  <span className="bdg" style={{ background: STATUS_CLR[b.status] + '20', color: STATUS_CLR[b.status] }}>{STATUS_LBL[b.status]}</span>
+                </div>
+                <div style={{ fontSize: 14, color: 'var(--ink)', marginBottom: 4, fontWeight: 600 }}>{b.material}</div>
+                <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 4 }}>Classificação {b.classification}</div>
+                <div style={{ fontSize: 12, color: 'var(--mist)', marginBottom: 10 }}>Vol. {(b.net_volume || 0).toFixed(2)} m³</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 18, color: 'var(--sap7)' }}>{money(b.total_value, b.currency)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Detail modal */}
+      {selected && (
+        <div className="mo" onClick={() => setSelected(null)}>
+          <div className="md" style={{ maxWidth: 700 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div className="mtit">{selected.code} — {selected.material}</div>
+              <button className="btn bo bsm" onClick={() => setSelected(null)}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              {selected.photos && selected.photos.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', gap: 8, marginBottom: 18 }}>
+                  {selected.photos.map((url, i) => (
+                    <img key={i} src={url} alt="" style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 8 }} />
+                  ))}
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 10, marginBottom: 14 }}>
+                <div className="sc" style={{ padding: 12 }}>
+                  <div className="slbl2">Volume Líquido</div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 18 }}>{(selected.net_volume || 0).toFixed(2)} m³</div>
+                </div>
+                <div className="sc" style={{ padding: 12, borderTopColor: 'var(--warn)' }}>
+                  <div className="slbl2">Classificação</div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 18 }}>{selected.classification}</div>
+                </div>
+                <div className="sc" style={{ padding: 12, borderTopColor: 'var(--ok)' }}>
+                  <div className="slbl2">Preço m³</div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{money(selected.price_m3, selected.currency)}</div>
+                </div>
+              </div>
+              <div style={{ background: 'var(--sap1)', padding: 18, borderRadius: 10, textAlign: 'center', marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: 'var(--sap7)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Valor Total</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontSize: 30, fontWeight: 800, color: 'var(--sap7)' }}>{money(selected.total_value, selected.currency)}</div>
+              </div>
+              {selected.quarry && (
+                <div style={{ fontSize: 13, color: 'var(--mist)', textAlign: 'center', marginBottom: 10 }}>
+                  📍 {selected.quarry.name} {selected.quarry.location && ' · ' + selected.quarry.location}
+                </div>
+              )}
+              {selected.notes && (
+                <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8, fontSize: 13 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 4 }}>Observações</div>
+                  {selected.notes}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════
 export default function App() {
   const [profile, setProfile]     = useState(null)
   const [loading, setLoading]     = useState(true)
   const [page,    setPage]        = useState('dashboard')
+
+  // Set initial page when profile loads
+  useEffect(() => {
+    if (!profile) return
+    const initial = {
+      owner: 'dashboard',
+      foreman: 'blocks',
+      seller: 'blocks',
+      client: 'catalog',
+    }
+    setPage(initial[profile.role] || 'dashboard')
+  }, [profile?.id, profile?.role])
   const [sbOpen,  setSbOpen]      = useState(false)
   const [toast,   setToast]       = useState(null)
 
@@ -1270,6 +1738,9 @@ export default function App() {
   const [payments, setPayments]   = useState([])
   const [blocks,   setBlocks]     = useState([])
   const [sales,    setSales]      = useState([])
+  const [team,     setTeam]       = useState([])
+  const [releases, setReleases]   = useState([])
+  const [catalog,  setCatalog]    = useState([])
 
   const showToast = useCallback((msg, type = '') => {
     setToast({ msg, type })
@@ -1280,14 +1751,26 @@ export default function App() {
   const loadData = useCallback(async (p) => {
     if (!p) return
     try {
-      const [q, c, pm, b, s] = await Promise.all([
-        api.listQuarries(p),
-        api.listClients(p),
-        api.listPaymentMethods(p),
-        api.listBlocks(p),
-        api.listSales(p),
-      ])
-      setQuarries(q); setClients(c); setPayments(pm); setBlocks(b); setSales(s)
+      // If client, load catalog; otherwise load full team data
+      if (p.role === 'client') {
+        const cat = await api.listClientCatalog(p)
+        setCatalog(cat)
+        // Empty arrays for unused data
+        setQuarries([]); setClients([]); setPayments([]); setBlocks([]); setSales([]); setTeam([]); setReleases([])
+      } else {
+        const [q, c, pm, b, s, t, r] = await Promise.all([
+          api.listQuarries(p),
+          api.listClients(p),
+          api.listPaymentMethods(p),
+          api.listBlocks(p),
+          api.listSales(p),
+          api.listTeam(p),
+          api.listBlockReleases(p),
+        ])
+        setQuarries(q); setClients(c); setPayments(pm); setBlocks(b)
+        setSales(s); setTeam(t); setReleases(r)
+        setCatalog([])
+      }
     } catch (e) {
       console.error('loadData error:', e)
       showToast('Erro ao carregar dados: ' + e.message, 'err')
@@ -1352,6 +1835,7 @@ export default function App() {
     try { await api.signOut() } catch (e) { console.error(e) }
     setProfile(null)
     setBlocks([]); setQuarries([]); setClients([]); setPayments([]); setSales([])
+    setTeam([]); setReleases([]); setCatalog([])
   }
 
   if (loading) return (
@@ -1379,24 +1863,53 @@ export default function App() {
     </>
   )
 
-  const NAV = [
-    { p: 'dashboard', l: 'Dashboard',   i: 'grid' },
-    { p: 'blocks',    l: 'Blocos',      i: 'cube' },
-    { p: 'sales',     l: 'Vendas',      i: 'cart' },
-    { p: 'quarries',  l: 'Pedreiras',   i: 'mtn' },
-    { p: 'clients',   l: 'Clientes',    i: 'user' },
-    { p: 'payments',  l: 'Pagamentos',  i: 'card' },
-  ]
+  // Navigation based on role
+  let NAV = []
+  if (profile.role === 'owner') {
+    NAV = [
+      { p: 'dashboard', l: 'Dashboard',         i: 'grid' },
+      { p: 'blocks',    l: 'Blocos',            i: 'cube' },
+      { p: 'sales',     l: 'Vendas',            i: 'cart' },
+      { p: 'releases',  l: 'Liberar Catálogo',  i: 'check' },
+      { p: 'quarries',  l: 'Pedreiras',         i: 'mtn' },
+      { p: 'team',      l: 'Equipe',            i: 'user' },
+      { p: 'clients',   l: 'Clientes',          i: 'user' },
+      { p: 'payments',  l: 'Pagamentos',        i: 'card' },
+    ]
+  } else if (profile.role === 'foreman') {
+    NAV = [
+      { p: 'blocks',    l: 'Blocos',            i: 'cube' },
+      { p: 'quarries',  l: 'Pedreiras',         i: 'mtn' },
+    ]
+  } else if (profile.role === 'seller') {
+    NAV = [
+      { p: 'dashboard', l: 'Dashboard',         i: 'grid' },
+      { p: 'blocks',    l: 'Blocos',            i: 'cube' },
+      { p: 'sales',     l: 'Minhas Vendas',     i: 'cart' },
+      { p: 'releases',  l: 'Liberar Catálogo',  i: 'check' },
+      { p: 'clients',   l: 'Clientes',          i: 'user' },
+    ]
+  } else if (profile.role === 'client') {
+    NAV = [
+      { p: 'catalog',   l: 'Catálogo',          i: 'cube' },
+    ]
+  }
 
   const renderPage = () => {
     switch (page) {
       case 'dashboard': return <Dashboard blocks={blocks} quarries={quarries} clients={clients} />
       case 'blocks':    return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
       case 'sales':     return <SalesPage profile={profile} sales={sales} blocks={blocks} onChange={() => loadData(profile)} toast={showToast} />
+      case 'releases':  return <ReleasesPage profile={profile} blocks={blocks} clients={clients} releases={releases} onChange={() => loadData(profile)} toast={showToast} />
       case 'quarries':  return <QuarriesPage profile={profile} quarries={quarries} blocks={blocks} onChange={() => loadData(profile)} toast={showToast} />
+      case 'team':      return <TeamPage profile={profile} team={team} onChange={() => loadData(profile)} toast={showToast} />
       case 'clients':   return <ClientsPage profile={profile} clients={clients} onChange={() => loadData(profile)} toast={showToast} />
       case 'payments':  return <PaymentsPage profile={profile} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
-      default:          return <Dashboard blocks={blocks} quarries={quarries} clients={clients} />
+      case 'catalog':   return <CatalogPage profile={profile} catalog={catalog} toast={showToast} />
+      default:
+        if (profile.role === 'client') return <CatalogPage profile={profile} catalog={catalog} toast={showToast} />
+        if (profile.role === 'foreman') return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
+        return <Dashboard blocks={blocks} quarries={quarries} clients={clients} />
     }
   }
 

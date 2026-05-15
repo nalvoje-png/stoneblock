@@ -312,6 +312,107 @@ export async function reverseSale(saleId, blockIds) {
   if (error) throw error
 }
 
+// ─── TEAM (profiles - foreman/seller/client) ────────────────────
+export async function listTeam(profile) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('company_id', companyId)
+    .neq('id', profile.id)  // exclude owner itself
+    .order('name')
+  if (error) throw error
+  return data || []
+}
+
+export async function updateTeamMember(id, payload) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .update(payload)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+// ─── BLOCK RELEASES (catálogo liberado para clientes) ───────────
+export async function listBlockReleases(profile) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+  const { data, error } = await supabase
+    .from('block_releases')
+    .select(`
+      *,
+      client:clients(id, name),
+      liberador:profiles!liberado_por(id, name)
+    `)
+    .eq('company_id', companyId)
+  if (error) throw error
+  return data || []
+}
+
+export async function releaseBlocks(profile, blockIds, clientIds) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+  // Create cartesian product: each block × each client
+  const rows = []
+  for (const bid of blockIds) {
+    for (const cid of clientIds) {
+      rows.push({
+        company_id: companyId,
+        block_id: bid,
+        client_id: cid,
+        liberado_por: profile.id,
+        data_liberacao: new Date().toISOString(),
+      })
+    }
+  }
+  // Upsert (ignore duplicates via unique constraint)
+  const { error } = await supabase.from('block_releases').upsert(rows, { onConflict: 'block_id,client_id', ignoreDuplicates: true })
+  if (error) throw error
+}
+
+export async function revokeRelease(blockId, clientId) {
+  const { error } = await supabase
+    .from('block_releases')
+    .delete()
+    .eq('block_id', blockId)
+    .eq('client_id', clientId)
+  if (error) throw error
+}
+
+// ─── CATALOG (blocos liberados para o cliente logado) ───────────
+export async function listClientCatalog(profile) {
+  // Encontra o registro de cliente vinculado a esse user
+  const { data: clientRec } = await supabase
+    .from('clients')
+    .select('id')
+    .eq('user_id', profile.id)
+    .maybeSingle()
+
+  if (!clientRec) return []
+
+  // Lista blocks liberados para esse cliente
+  const { data, error } = await supabase
+    .from('block_releases')
+    .select(`
+      block:blocks(*, quarry:quarries(name, location))
+    `)
+    .eq('client_id', clientRec.id)
+
+  if (error) throw error
+
+  // Extract blocks and normalize
+  return (data || [])
+    .map(r => r.block)
+    .filter(b => b && b.status !== 'sold')
+    .map(b => ({
+      ...b,
+      photos: Array.isArray(b.photos) ? b.photos
+            : typeof b.photos === 'string' ? (b.photos.startsWith('[') ? JSON.parse(b.photos) : [b.photos])
+            : []
+    }))
+}
+
 // ─── PHOTO UPLOAD ──────────────────────────────────────────────
 export async function uploadBlockPhoto(profile, file, blockCode) {
   // Sanitize: only safe characters in filename
@@ -360,6 +461,9 @@ export function subscribeRealtime(profile, onChange) {
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'sales', filter: `company_id=eq.${companyId}` },
         () => onChange('sales'))
+    .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'block_releases', filter: `company_id=eq.${companyId}` },
+        () => onChange('block_releases'))
     .subscribe()
 
   return channel
