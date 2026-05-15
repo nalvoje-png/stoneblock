@@ -236,12 +236,26 @@ export async function deleteBlock(id) {
 
 // ─── PHOTO UPLOAD ──────────────────────────────────────────────
 export async function uploadBlockPhoto(profile, file, blockCode) {
-  const ext = file.name.split('.').pop()
-  const path = `${profile.id}/${Date.now()}-${blockCode}.${ext}`
-  const { error } = await supabase.storage
+  // Sanitize: only safe characters in filename
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const cleanCode = (blockCode || 'block').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 20)
+  const path = `${profile.id}/${Date.now()}_${cleanCode}.${ext || 'jpg'}`
+  console.log('Uploading to path:', path, 'file size:', file.size, 'type:', file.type)
+
+  const { data: uploadData, error } = await supabase.storage
     .from('block-photos')
-    .upload(path, file, { cacheControl: '3600', upsert: false })
-  if (error) throw error
+    .upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type || 'image/jpeg'
+    })
+
+  if (error) {
+    console.error('Upload error:', error)
+    throw new Error(error.message || 'Falha no upload')
+  }
+
   const { data } = supabase.storage.from('block-photos').getPublicUrl(path)
+  console.log('Upload OK, URL:', data.publicUrl)
   return data.publicUrl
 }

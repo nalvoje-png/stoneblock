@@ -659,6 +659,21 @@ function BlocksPage({ profile, blocks, quarries, onChange, toast }) {
   const handlePhotos = async (e) => {
     const files = Array.from(e.target.files || [])
     if (!files.length) return
+
+    // Validate file sizes (max 5MB each)
+    for (const f of files) {
+      if (f.size > 5 * 1024 * 1024) {
+        toast(`Foto "${f.name}" muito grande (máx. 5MB)`, 'err')
+        e.target.value = ''
+        return
+      }
+      if (!f.type.startsWith('image/')) {
+        toast(`"${f.name}" não é uma imagem válida`, 'err')
+        e.target.value = ''
+        return
+      }
+    }
+
     setUploading(true)
     try {
       const urls = []
@@ -666,9 +681,15 @@ function BlocksPage({ profile, blocks, quarries, onChange, toast }) {
         const url = await api.uploadBlockPhoto(profile, f, form.code || 'tmp')
         urls.push(url)
       }
-      setForm({ ...form, photos: [...form.photos, ...urls] })
-      toast(`${urls.length} foto(s) enviada(s)`, 'ok')
-    } catch (e) { toast('Erro no upload: ' + e.message, 'err') } finally { setUploading(false) }
+      setForm(prev => ({ ...prev, photos: [...prev.photos, ...urls] }))
+      toast(`${urls.length} foto(s) enviada(s) com sucesso`, 'ok')
+    } catch (e) {
+      console.error('Photo upload error:', e)
+      toast('Erro no upload: ' + (e.message || 'desconhecido'), 'err')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
   }
 
   const save = async () => {
