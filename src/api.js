@@ -259,3 +259,31 @@ export async function uploadBlockPhoto(profile, file, blockCode) {
   console.log('Upload OK, URL:', data.publicUrl)
   return data.publicUrl
 }
+
+// ─── REALTIME ───────────────────────────────────────────────────
+// Sincroniza mudanças entre dispositivos em tempo real
+export function subscribeRealtime(profile, onChange) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+
+  const channel = supabase
+    .channel('stoneblock-realtime')
+    .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'blocks', filter: `company_id=eq.${companyId}` },
+        () => onChange('blocks'))
+    .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'quarries', filter: `company_id=eq.${companyId}` },
+        () => onChange('quarries'))
+    .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'clients', filter: `company_id=eq.${companyId}` },
+        () => onChange('clients'))
+    .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'payment_methods', filter: `company_id=eq.${companyId}` },
+        () => onChange('payment_methods'))
+    .subscribe()
+
+  return channel
+}
+
+export function unsubscribeRealtime(channel) {
+  if (channel) supabase.removeChannel(channel)
+}

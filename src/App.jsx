@@ -961,6 +961,22 @@ export default function App() {
     return () => { mounted = false }
   }, [loadData])
 
+  // ─── REALTIME — sincronização automática entre dispositivos ───
+  useEffect(() => {
+    if (!profile) return
+    console.log('Setting up realtime subscription...')
+
+    const channel = api.subscribeRealtime(profile, (table) => {
+      console.log('Realtime update on:', table)
+      loadData(profile).catch(err => console.error('realtime reload:', err))
+    })
+
+    return () => {
+      console.log('Cleaning up realtime')
+      api.unsubscribeRealtime(channel)
+    }
+  }, [profile, loadData])
+
   // Handler for successful login - called by LoginPage directly
   const handleLoginSuccess = useCallback(async (newProfile) => {
     console.log('Login success, setting profile')
