@@ -455,21 +455,28 @@ function ClientsPage({ profile, clients, onChange, toast }) {
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState(null)
   const [form, setForm] = useState({ name: '', country: 'Brasil', phone: '', email: '', doc: '', notes: '' })
+  const [createAccount, setCreateAccount] = useState(false)
+  const [password, setPassword] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const openNew = () => { setForm({ name: '', country: 'Brasil', phone: '', email: '', doc: '', notes: '' }); setEditId(null); setShowForm(true) }
-  const openEdit = c => { setForm({ name: c.name, country: c.country || 'Brasil', phone: c.phone || '', email: c.email || '', doc: c.doc || '', notes: c.notes || '' }); setEditId(c.id); setShowForm(true) }
+  const openNew = () => { setForm({ name: '', country: 'Brasil', phone: '', email: '', doc: '', notes: '' }); setEditId(null); setCreateAccount(false); setPassword(''); setShowForm(true) }
+  const openEdit = c => { setForm({ name: c.name, country: c.country || 'Brasil', phone: c.phone || '', email: c.email || '', doc: c.doc || '', notes: c.notes || '' }); setEditId(c.id); setCreateAccount(false); setPassword(''); setShowForm(true) }
 
   const save = async () => {
     if (!form.name.trim()) { toast('Nome obrigatório.', 'err'); return }
+    if (createAccount && !editId) {
+      if (!form.email.trim()) { toast('E-mail obrigatório para criar conta.', 'err'); return }
+      if (!password || password.length < 6) { toast('Senha deve ter ao menos 6 caracteres.', 'err'); return }
+    }
     setSaving(true)
     try {
       if (editId) {
         await api.updateClient(editId, form)
         toast('Cliente atualizado!', 'ok')
       } else {
-        await api.createClient(profile, form)
-        toast('Cliente cadastrado!', 'ok')
+        const accountData = createAccount ? { email: form.email, password } : null
+        await api.createClient(profile, form, accountData)
+        toast(createAccount ? 'Cliente cadastrado com acesso ao sistema!' : 'Cliente cadastrado!', 'ok')
       }
       await onChange()
       setShowForm(false)
@@ -496,7 +503,7 @@ function ClientsPage({ profile, clients, onChange, toast }) {
       {clients.length === 0
         ? <div className="es"><div style={{ marginBottom: 12, opacity: .3 }}><Icon n="user" s={48} /></div><div className="estit">Nenhum cliente cadastrado</div></div>
         : <div className="card"><div className="tw"><table>
-          <thead><tr><th>Nome</th><th>País</th><th>Contato</th><th>Documento</th><th></th></tr></thead>
+          <thead><tr><th>Nome</th><th>País</th><th>Contato</th><th>Documento</th><th>Acesso</th><th></th></tr></thead>
           <tbody>
             {clients.map(c => (
               <tr key={c.id}>
@@ -504,6 +511,11 @@ function ClientsPage({ profile, clients, onChange, toast }) {
                 <td>{c.country}</td>
                 <td style={{ fontSize: 13 }}>{c.phone || c.email || '—'}</td>
                 <td style={{ fontSize: 13, color: 'var(--mist)' }}>{c.doc || '—'}</td>
+                <td>
+                  {c.user_id
+                    ? <span className="bdg" style={{ background: '#dcfce7', color: '#15803d' }}>✓ Conta ativa</span>
+                    : <span className="bdg" style={{ background: 'var(--haze)', color: 'var(--mist)' }}>Sem acesso</span>}
+                </td>
                 <td style={{ textAlign: 'right' }}>
                   <button className="btn bo bsm" onClick={() => openEdit(c)} style={{ marginRight: 6 }}><Icon n="edit" s={13} /></button>
                   <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => del(c)}><Icon n="trash" s={13} c="var(--err)" /></button>
@@ -531,6 +543,38 @@ function ClientsPage({ profile, clients, onChange, toast }) {
                 <div className="fg"><label className="fl">E-mail</label><input className="fc" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
               </div>
               <div className="fg"><label className="fl">Observações</label><textarea className="fc" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
+
+              {/* Account creation section (only for new clients) */}
+              {!editId && (
+                <div style={{ background: 'var(--sap1)', padding: 14, borderRadius: 10, marginTop: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: createAccount ? 12 : 0 }} onClick={() => setCreateAccount(!createAccount)}>
+                    <div style={{ width: 20, height: 20, borderRadius: 5, border: '2px solid', display: 'flex', alignItems: 'center', justifyContent: 'center', borderColor: createAccount ? 'var(--sap6)' : 'var(--fog)', background: createAccount ? 'var(--sap6)' : '#fff' }}>
+                      {createAccount && <Icon n="check" s={12} c="#fff" />}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, color: 'var(--sap7)' }}>Criar acesso ao sistema</div>
+                      <div style={{ fontSize: 12, color: 'var(--mist)' }}>Cliente poderá fazer login e ver o catálogo</div>
+                    </div>
+                  </div>
+                  {createAccount && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div className="fg" style={{ marginBottom: 0 }}>
+                        <label className="fl">E-mail de login *</label>
+                        <input className="fc" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="cliente@email.com" />
+                      </div>
+                      <div className="fg" style={{ marginBottom: 0 }}>
+                        <label className="fl">Senha *</label>
+                        <input className="fc" type="text" value={password} onChange={e => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {editId && clients.find(c => c.id === editId)?.user_id && (
+                <div style={{ background: '#dcfce7', padding: 12, borderRadius: 8, marginTop: 8, fontSize: 13, color: '#15803d' }}>
+                  ✓ Este cliente possui acesso ativo ao sistema
+                </div>
+              )}
             </div>
             <div className="mfoot">
               <button className="btn bo" onClick={() => setShowForm(false)}>Cancelar</button>
@@ -1261,6 +1305,8 @@ function SalesPage({ profile, sales, blocks, onChange, toast }) {
 function TeamPage({ profile, team, onChange, toast }) {
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState({ name: '', phone: '', role: '', commission: false, commission_pct: '' })
+  const [showNew, setShowNew] = useState(false)
+  const [newForm, setNewForm] = useState({ name: '', email: '', password: '', phone: '', role: 'seller', commission: false, commission_pct: '' })
   const [saving, setSaving] = useState(false)
 
   const sellers = team.filter(t => t.role === 'seller')
@@ -1278,6 +1324,32 @@ function TeamPage({ profile, team, onChange, toast }) {
       commission_pct: u.commission_pct || '',
     })
     setEditingId(u.id)
+  }
+
+  const openNew = () => {
+    setNewForm({ name: '', email: '', password: '', phone: '', role: 'seller', commission: false, commission_pct: '' })
+    setShowNew(true)
+  }
+
+  const saveNew = async () => {
+    if (!newForm.name.trim()) { toast('Nome obrigatório.', 'err'); return }
+    if (!newForm.email.trim()) { toast('E-mail obrigatório.', 'err'); return }
+    if (!newForm.password || newForm.password.length < 6) { toast('Senha deve ter ao menos 6 caracteres.', 'err'); return }
+    setSaving(true)
+    try {
+      await api.createTeamMember(profile, newForm.email.trim(), newForm.password, {
+        name: newForm.name.trim(),
+        phone: newForm.phone.trim() || null,
+        role: newForm.role,
+        commission: newForm.commission,
+        commission_pct: newForm.commission_pct,
+      })
+      await onChange()
+      toast('Membro cadastrado!', 'ok')
+      setShowNew(false)
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setSaving(false) }
   }
 
   const save = async () => {
@@ -1303,25 +1375,22 @@ function TeamPage({ profile, team, onChange, toast }) {
   return (
     <div>
       <div className="ph">
-        <div className="ptit">Equipe</div>
-        <div className="psub">{team.length} membro(s) · {foremen.length} encarregado(s) · {sellers.length} vendedor(es) · {clientUsers.length} cliente(s)</div>
-      </div>
-
-      <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 'var(--r-md)', padding: '14px 18px', marginBottom: 20, fontSize: 13, color: '#1e40af' }}>
-        <div style={{ fontWeight: 700, marginBottom: 6 }}>➕ Como adicionar novos membros</div>
-        <div style={{ lineHeight: 1.7 }}>
-          <strong>1.</strong> Acesse <strong>supabase.com</strong> → seu projeto → <strong>Authentication → Users</strong><br />
-          <strong>2.</strong> Clique em <strong>"Add user" → "Create new user"</strong> → informe e-mail e senha<br />
-          <strong>3.</strong> O usuário será criado e aparecerá nesta lista automaticamente<br />
-          <strong>4.</strong> Aqui você define o nome, telefone, função e percentual de comissão
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="ptit">Equipe</div>
+            <div className="psub">{team.length} membro(s) · {foremen.length} encarregado(s) · {sellers.length} vendedor(es) · {clientUsers.length} cliente(s)</div>
+          </div>
+          <button className="btn bb" onClick={openNew}>
+            <Icon n="plus" s={16} c="#fff" /> Novo Membro
+          </button>
         </div>
       </div>
 
       {team.length === 0 ? (
         <div className="es">
           <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="user" s={48} /></div>
-          <div className="estit">Nenhum membro além de você</div>
-          <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>Siga as instruções acima para adicionar.</div>
+          <div className="estit">Nenhum membro cadastrado</div>
+          <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>Clique em "Novo Membro" para adicionar.</div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1354,6 +1423,60 @@ function TeamPage({ profile, team, onChange, toast }) {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* New member modal */}
+      {showNew && (
+        <div className="mo" onClick={() => setShowNew(false)}>
+          <div className="md" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div className="mtit">Novo Membro</div>
+              <button className="btn bo bsm" onClick={() => setShowNew(false)}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              <div className="fg"><label className="fl">Função *</label>
+                <select className="fc" value={newForm.role} onChange={e => setNewForm({ ...newForm, role: e.target.value })}>
+                  <option value="seller">Vendedor (vende blocos e pode dar comissão)</option>
+                  <option value="foreman">Encarregado (cadastra e edita blocos)</option>
+                </select>
+              </div>
+              <div className="fg"><label className="fl">Nome *</label>
+                <input className="fc" value={newForm.name} onChange={e => setNewForm({ ...newForm, name: e.target.value })} placeholder="Nome completo" />
+              </div>
+              <div className="fg"><label className="fl">Telefone / WhatsApp</label>
+                <input className="fc" value={newForm.phone} onChange={e => setNewForm({ ...newForm, phone: e.target.value })} placeholder="+55 27 99999-0000" />
+              </div>
+              <div style={{ background: 'var(--sap1)', padding: 14, borderRadius: 10, marginBottom: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--sap7)', marginBottom: 10 }}>Acesso ao Sistema</div>
+                <div className="fg" style={{ marginBottom: 10 }}><label className="fl">E-mail *</label>
+                  <input className="fc" type="email" value={newForm.email} onChange={e => setNewForm({ ...newForm, email: e.target.value })} placeholder="usuario@email.com" />
+                </div>
+                <div className="fg" style={{ marginBottom: 0 }}><label className="fl">Senha *</label>
+                  <input className="fc" type="text" value={newForm.password} onChange={e => setNewForm({ ...newForm, password: e.target.value })} placeholder="Mínimo 6 caracteres" />
+                </div>
+              </div>
+              {newForm.role === 'seller' && (
+                <div className="fg">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 8 }} onClick={() => setNewForm({ ...newForm, commission: !newForm.commission })}>
+                    <div style={{ width: 20, height: 20, borderRadius: 5, border: '2px solid', display: 'flex', alignItems: 'center', justifyContent: 'center', borderColor: newForm.commission ? 'var(--sap6)' : 'var(--fog)', background: newForm.commission ? 'var(--sap6)' : 'transparent' }}>
+                      {newForm.commission && <Icon n="check" s={12} c="#fff" />}
+                    </div>
+                    <label className="fl" style={{ cursor: 'pointer', margin: 0 }}>Recebe comissão sobre vendas</label>
+                  </div>
+                  {newForm.commission && (
+                    <input className="fc" type="number" min="0" max="100" step="0.5" value={newForm.commission_pct} onChange={e => setNewForm({ ...newForm, commission_pct: e.target.value })} placeholder="Ex: 5 (significa 5%)" />
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={() => setShowNew(false)}>Cancelar</button>
+              <button className="btn bb" onClick={saveNew} disabled={saving}>
+                {saving ? <><span className="spinner"></span> Cadastrando</> : 'Cadastrar Membro'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

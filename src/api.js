@@ -15,6 +15,32 @@ export async function signOut() {
   await supabase.auth.signOut()
 }
 
+// Cria conta nova (usado para cadastrar cliente, vendedor ou encarregado)
+// Retorna o user.id criado
+export async function signUpUser(email, password, profileData) {
+  // Preserva a sessão do owner para reusar depois
+  const { data: { session: ownerSession } } = await supabase.auth.getSession()
+
+  // Cria a conta
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { name: profileData.name, role: profileData.role } }
+  })
+  if (error) throw error
+
+  // signUp pode fazer login automático no usuário recém-criado.
+  // Precisamos restaurar a sessão do owner.
+  if (ownerSession) {
+    await supabase.auth.setSession({
+      access_token: ownerSession.access_token,
+      refresh_token: ownerSession.refresh_token,
+    })
+  }
+
+  return data.user
+}
+
 export async function getSession() {
   const { data } = await supabase.auth.getSession()
   return data.session
@@ -118,10 +144,35 @@ export async function listClients(profile) {
   return data || []
 }
 
-export async function createClient(profile, payload) {
+export async function createClient(profile, payload, accountData) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+
+  // Se accountData foi passado, cria a conta do cliente
+  let userId = null
+  if (accountData?.email && accountData?.password) {
+    const user = await signUpUser(accountData.email, accountData.password, {
+      name: payload.name,
+      role: 'client',
+    })
+    userId = user?.id
+
+    // Atualiza o profile criado pelo trigger com role correto e company_id
+    if (userId) {
+      // Aguarda um pouco para o trigger criar o profile
+      await new Promise(r => setTimeout(r, 500))
+      await supabase.from('profiles').update({
+        role: 'client',
+        company_id: companyId,
+        name: payload.name,
+        phone: payload.phone || null,
+        avatar: payload.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
+      }).eq('id', userId)
+    }
+  }
+
   const { data, error } = await supabase
     .from('clients')
-    .insert({ ...payload, company_id: getCompanyId(profile) })
+    .insert({ ...payload, company_id: companyId, user_id: userId })
     .select()
     .single()
   if (error) throw error
@@ -325,6 +376,33 @@ export async function listTeam(profile) {
   return data || []
 }
 
+// Cria novo membro da equipe (encarregado ou vendedor)
+export async function createTeamMember(profile, email, password, payload) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+
+  const user = await signUpUser(email, password, {
+    name: payload.name,
+    role: payload.role,
+  })
+
+  if (user?.id) {
+    // Aguarda o trigger criar o profile
+    await new Promise(r => setTimeout(r, 500))
+    const { error } = await supabase.from('profiles').update({
+      role: payload.role,
+      company_id: companyId,
+      name: payload.name,
+      phone: payload.phone || null,
+      commission: payload.commission || false,
+      commission_pct: payload.commission ? parseFloat(payload.commission_pct) || 0 : 0,
+      avatar: payload.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
+    }).eq('id', user.id)
+    if (error) throw error
+  }
+
+  return user
+}
+
 export async function updateTeamMember(id, payload) {
   const { data, error } = await supabase
     .from('profiles')
@@ -464,6 +542,9 @@ export function subscribeRealtime(profile, onChange) {
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'block_releases', filter: `company_id=eq.${companyId}` },
         () => onChange('block_releases'))
+    .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles', filter: `company_id=eq.${companyId}` },
+        () => onChange('profiles'))
     .subscribe()
 
   return channel
