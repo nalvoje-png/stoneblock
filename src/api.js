@@ -350,24 +350,6 @@ export async function removeClientUser(clientUserId) {
   if (error) throw error
 }
 
-// Reservar bloco para um cliente
-export async function reserveBlock(blockId, clientId) {
-  const { error } = await supabase
-    .from('blocks')
-    .update({ status: 'reserved', reserved_for: clientId })
-    .eq('id', blockId)
-  if (error) throw error
-}
-
-// Desfazer reserva
-export async function unreserveBlock(blockId) {
-  const { error } = await supabase
-    .from('blocks')
-    .update({ status: 'available', reserved_for: null })
-    .eq('id', blockId)
-  if (error) throw error
-}
-
 // ─── SALES ──────────────────────────────────────────────────────
 export async function listSales(profile) {
   const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
