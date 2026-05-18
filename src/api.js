@@ -237,7 +237,10 @@ export async function deletePaymentMethod(id) {
 export async function listBlocks(profile) {
   const { data, error } = await supabase
     .from('blocks')
-    .select('*')
+    .select(`
+      *,
+      reserved_client:clients!reserved_for(id, name)
+    `)
     .eq('company_id', getCompanyId(profile))
     .order('created_at', { ascending: false })
   if (error) throw error
@@ -282,6 +285,86 @@ export async function updateBlock(id, payload) {
 
 export async function deleteBlock(id) {
   const { error } = await supabase.from('blocks').delete().eq('id', id)
+  if (error) throw error
+}
+
+// Reservar bloco para cliente
+export async function reserveBlock(blockId, clientId) {
+  const { error } = await supabase
+    .from('blocks')
+    .update({ status: 'reserved', reserved_for: clientId })
+    .eq('id', blockId)
+  if (error) throw error
+}
+
+// Liberar reserva
+export async function unreserveBlock(blockId) {
+  const { error } = await supabase
+    .from('blocks')
+    .update({ status: 'available', reserved_for: null })
+    .eq('id', blockId)
+  if (error) throw error
+}
+
+// ─── CLIENT USERS (múltiplos acessos por cliente) ───────────────
+export async function listClientUsers(clientId) {
+  const { data, error } = await supabase
+    .from('client_users')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('created_at')
+  if (error) throw error
+  return data || []
+}
+
+export async function addClientUser(profile, clientId, email, password, userName) {
+  // Cria conta no auth
+  const user = await signUpUser(email, password, { name: userName, role: 'client' })
+  if (!user?.id) throw new Error('Falha ao criar usuário')
+
+  // Aguarda trigger criar profile
+  await new Promise(r => setTimeout(r, 500))
+
+  // Atualiza profile com role e company_id corretos
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+  await supabase.from('profiles').update({
+    role: 'client',
+    company_id: companyId,
+    name: userName,
+    avatar: userName.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
+  }).eq('id', user.id)
+
+  // Cria registro client_users
+  const { error } = await supabase.from('client_users').insert({
+    client_id: clientId,
+    user_id: user.id,
+    name: userName,
+  })
+  if (error) throw error
+
+  return user
+}
+
+export async function removeClientUser(clientUserId) {
+  const { error } = await supabase.from('client_users').delete().eq('id', clientUserId)
+  if (error) throw error
+}
+
+// Reservar bloco para um cliente
+export async function reserveBlock(blockId, clientId) {
+  const { error } = await supabase
+    .from('blocks')
+    .update({ status: 'reserved', reserved_for: clientId })
+    .eq('id', blockId)
+  if (error) throw error
+}
+
+// Desfazer reserva
+export async function unreserveBlock(blockId) {
+  const { error } = await supabase
+    .from('blocks')
+    .update({ status: 'available', reserved_for: null })
+    .eq('id', blockId)
   if (error) throw error
 }
 
@@ -459,14 +542,27 @@ export async function revokeRelease(blockId, clientId) {
 }
 
 // ─── CATALOG (blocos liberados para o cliente logado) ───────────
+async function getClientByUser(userId) {
+  // Primeiro tenta direto na tabela clients (cliente principal)
+  const { data: direct } = await supabase
+    .from('clients')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (direct) return direct
+
+  // Depois tenta via client_users (acesso adicional)
+  const { data: cu } = await supabase
+    .from('client_users')
+    .select('client:clients(*)')
+    .eq('user_id', userId)
+    .maybeSingle()
+  return cu?.client || null
+}
+
 export async function listClientCatalog(profile) {
   // Encontra o registro de cliente vinculado a esse user
-  const { data: clientRec } = await supabase
-    .from('clients')
-    .select('id')
-    .eq('user_id', profile.id)
-    .maybeSingle()
-
+  const clientRec = await getClientByUser(profile.id)
   if (!clientRec) return []
 
   // Lista blocks liberados para esse cliente
@@ -545,6 +641,12 @@ export function subscribeRealtime(profile, onChange) {
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'profiles', filter: `company_id=eq.${companyId}` },
         () => onChange('profiles'))
+    .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'orders', filter: `company_id=eq.${companyId}` },
+        () => onChange('orders'))
+    .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${profile.id}` },
+        () => onChange('notifications'))
     .subscribe()
 
   return channel
@@ -552,4 +654,119 @@ export function subscribeRealtime(profile, onChange) {
 
 export function unsubscribeRealtime(channel) {
   if (channel) supabase.removeChannel(channel)
+}
+
+// ─── ORDERS (pedidos de interesse do cliente) ───────────────────
+export async function listOrders(profile) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+  let query = supabase
+    .from('orders')
+    .select(`
+      *,
+      block:blocks(id, code, material, total_value, currency, net_volume, photos),
+      client:clients(id, name, country, user_id)
+    `)
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false })
+
+  // Cliente vê só os próprios pedidos
+  if (profile.role === 'client') {
+    const clientRec = await getClientByUser(profile.id)
+    if (!clientRec) return []
+    query = query.eq('client_id', clientRec.id)
+  }
+
+  const { data, error } = await query
+  if (error) throw error
+  return data || []
+}
+
+export async function createClientOrder(profile, blockId, message) {
+  // Cliente faz pedido — precisa achar o client record e company_id
+  const clientRec = await getClientByUser(profile.id)
+  if (!clientRec) throw new Error('Você não está vinculado a um cliente.')
+
+  const { data, error } = await supabase
+    .from('orders')
+    .insert({
+      company_id: clientRec.company_id,
+      block_id: blockId,
+      client_id: clientRec.id,
+      status: 'purchase_request',
+      message: message || null,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateOrderStatus(id, status, message) {
+  const { data, error } = await supabase
+    .from('orders')
+    .update({ status, ...(message ? { message } : {}) })
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+// ─── NOTIFICATIONS ──────────────────────────────────────────────
+export async function listNotifications(profile) {
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('*')
+    .eq('user_id', profile.id)
+    .order('created_at', { ascending: false })
+    .limit(50)
+  if (error) throw error
+  return data || []
+}
+
+export async function createNotification(userId, companyId, message, type = 'info') {
+  const { error } = await supabase
+    .from('notifications')
+    .insert({ user_id: userId, company_id: companyId, message, type })
+  if (error) console.warn('Notification error:', error)
+}
+
+export async function markNotificationRead(id) {
+  await supabase.from('notifications').update({ read: true }).eq('id', id)
+}
+
+export async function markAllNotificationsRead(profile) {
+  await supabase.from('notifications').update({ read: true }).eq('user_id', profile.id).eq('read', false)
+}
+
+// ─── FAVORITES (cliente marca blocos preferidos) ────────────────
+export async function listClientFavorites(profile) {
+  const clientRec = await getClientByUser(profile.id)
+  if (!clientRec) return []
+  const { data, error } = await supabase
+    .from('favorites')
+    .select('block_id')
+    .eq('client_id', clientRec.id)
+  if (error) throw error
+  return (data || []).map(f => f.block_id)
+}
+
+export async function toggleFavorite(profile, blockId) {
+  const clientRec = await getClientByUser(profile.id)
+  if (!clientRec) throw new Error('Cliente não vinculado')
+
+  const { data: existing } = await supabase
+    .from('favorites')
+    .select('id')
+    .eq('client_id', clientRec.id)
+    .eq('block_id', blockId)
+    .maybeSingle()
+
+  if (existing) {
+    await supabase.from('favorites').delete().eq('id', existing.id)
+    return false
+  } else {
+    await supabase.from('favorites').insert({ client_id: clientRec.id, block_id: blockId })
+    return true
+  }
 }

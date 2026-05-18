@@ -141,6 +141,13 @@ tr:hover{background:var(--haze);}
 @keyframes spin{to{transform:rotate(360deg);}}
 .loading-screen{min-height:100vh;background:#0c1a2e;display:flex;align-items:center;justify-content:center;color:#fff;}
 .loading-screen .spinner{width:32px;height:32px;border-width:3px;margin-bottom:14px;}
+
+/* Mobile-only utilities */
+@media(max-width:767px){
+  .mobile-only{display:block!important;}
+  .responsive-grid-2{grid-template-columns:1fr!important;}
+  .responsive-grid-3-mat{grid-template-columns:1fr!important;}
+}
 `
 
 // ─── ICONS ──────────────────────────────────────────────────────
@@ -229,20 +236,104 @@ function LoginPage({ onLoginSuccess }) {
 // ═══════════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════════
-function Dashboard({ blocks, quarries, clients }) {
-  const total     = blocks.length
-  const available = blocks.filter(b => b.status === 'available').length
-  const sold      = blocks.filter(b => b.status === 'sold').length
-  const reserved  = blocks.filter(b => b.status === 'reserved').length
+function Dashboard({ blocks, quarries, clients, sales }) {
+  const [filterQuarry, setFilterQuarry] = useState('')
+  const [filterPeriod, setFilterPeriod] = useState('all')
+  const [dtInicio, setDtInicio] = useState('')
+  const [dtFim, setDtFim] = useState('')
 
-  const totalBRL = blocks.filter(b => b.currency === 'BRL' && b.status !== 'sold').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
-  const totalUSD = blocks.filter(b => b.currency === 'USD' && b.status !== 'sold').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+  // Apply filters
+  const filteredBlocks = blocks.filter(b => {
+    if (filterQuarry && b.quarry_id !== filterQuarry) return false
+    if (filterPeriod !== 'all' && filterPeriod !== 'custom') {
+      const d = new Date(b.prod_date || b.created_at)
+      const now = new Date()
+      if (filterPeriod === 'month') {
+        if (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false
+      } else if (filterPeriod === 'last_month') {
+        const last = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        if (d.getMonth() !== last.getMonth() || d.getFullYear() !== last.getFullYear()) return false
+      } else if (filterPeriod === 'year') {
+        if (d.getFullYear() !== now.getFullYear()) return false
+      }
+    }
+    if (filterPeriod === 'custom') {
+      const d = new Date(b.prod_date || b.created_at)
+      if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
+      if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+    }
+    return true
+  })
+
+  const total     = filteredBlocks.length
+  const available = filteredBlocks.filter(b => b.status === 'available').length
+  const sold      = filteredBlocks.filter(b => b.status === 'sold').length
+  const reserved  = filteredBlocks.filter(b => b.status === 'reserved').length
+
+  const totalBRL = filteredBlocks.filter(b => b.currency === 'BRL' && b.status !== 'sold').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+  const totalUSD = filteredBlocks.filter(b => b.currency === 'USD' && b.status !== 'sold').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+
+  // Filtered sales
+  const filteredSales = (sales || []).filter(s => {
+    if (filterPeriod !== 'all' && filterPeriod !== 'custom') {
+      const d = new Date(s.created_at)
+      const now = new Date()
+      if (filterPeriod === 'month') {
+        if (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false
+      } else if (filterPeriod === 'last_month') {
+        const last = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        if (d.getMonth() !== last.getMonth() || d.getFullYear() !== last.getFullYear()) return false
+      } else if (filterPeriod === 'year') {
+        if (d.getFullYear() !== now.getFullYear()) return false
+      }
+    }
+    if (filterPeriod === 'custom') {
+      const d = new Date(s.created_at)
+      if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
+      if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+    }
+    return true
+  })
+
+  const salesTotalBRL = filteredSales.reduce((a, s) => a + (Number(s.total_brl) || 0), 0)
+  const salesTotalUSD = filteredSales.reduce((a, s) => a + (Number(s.total_usd) || 0), 0)
 
   return (
     <div>
       <div className="ph">
         <div className="ptit">Dashboard</div>
         <div className="psub">Visão geral do estoque</div>
+      </div>
+
+      {/* Filters */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="cb" style={{ padding: '14px 18px' }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Filtros:</span>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
+              <option value="all">Todos os períodos</option>
+              <option value="month">Mês atual</option>
+              <option value="last_month">Mês anterior</option>
+              <option value="year">Ano atual</option>
+              <option value="custom">Período personalizado</option>
+            </select>
+            {filterPeriod === 'custom' && (
+              <>
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} onChange={e => setDtInicio(e.target.value)} />
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} onChange={e => setDtFim(e.target.value)} />
+              </>
+            )}
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+              <option value="">Todas as pedreiras</option>
+              {quarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+            </select>
+            {(filterPeriod !== 'all' || filterQuarry) && (
+              <button className="btn bo bsm" onClick={() => { setFilterPeriod('all'); setFilterQuarry(''); setDtInicio(''); setDtFim('') }}>
+                <Icon n="x" s={13} /> Limpar
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="sg">
@@ -283,6 +374,20 @@ function Dashboard({ blocks, quarries, clients }) {
         </div>
       </div>
 
+      {/* Sales summary for the period */}
+      {sales && filteredSales.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 16, marginBottom: 16 }}>
+          <div className="card" style={{ background: 'linear-gradient(135deg,#0c1a2e,#1e3a8a)', color: '#fff', border: 'none' }}>
+            <div className="chead" style={{ borderBottomColor: 'rgba(255,255,255,.15)' }}><div className="ctit" style={{ color: '#fff' }}>💰 Faturamento do Período</div></div>
+            <div className="cb">
+              <div style={{ fontSize: 12, opacity: .7, marginBottom: 4 }}>{filteredSales.length} venda(s) realizada(s)</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 28, color: '#fff' }}>{money(salesTotalBRL, 'BRL')}</div>
+              {salesTotalUSD > 0 && <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, color: 'var(--sap4)', marginTop: 4 }}>+ {money(salesTotalUSD, 'USD')}</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 16 }}>
         <div className="card">
           <div className="chead"><div className="ctit">Pedreiras</div></div>
@@ -290,7 +395,7 @@ function Dashboard({ blocks, quarries, clients }) {
             {quarries.length === 0
               ? <div style={{ color: 'var(--mist)', fontSize: 13 }}>Nenhuma pedreira cadastrada</div>
               : quarries.map(q => {
-                const cnt = blocks.filter(b => b.quarry_id === q.id).length
+                const cnt = filteredBlocks.filter(b => b.quarry_id === q.id).length
                 return (
                   <div key={q.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--fog)' }}>
                     <div>
@@ -451,6 +556,109 @@ function QuarriesPage({ profile, quarries, blocks, onChange, toast }) {
 // ═══════════════════════════════════════════════════════════════
 // CLIENTS
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// CLIENT USERS MANAGER — gerencia múltiplos acessos para um cliente
+// ═══════════════════════════════════════════════════════════════
+function ClientUsersManager({ profile, clientId, toast }) {
+  const [users, setUsers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [newUser, setNewUser] = useState({ name: '', email: '', password: '' })
+  const [saving, setSaving] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const list = await api.listClientUsers(clientId)
+      setUsers(list)
+    } catch (e) { console.error(e) }
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [clientId])
+
+  const addUser = async () => {
+    if (!newUser.name.trim()) { toast('Nome obrigatório.', 'err'); return }
+    if (!newUser.email.trim()) { toast('E-mail obrigatório.', 'err'); return }
+    if (!newUser.password || newUser.password.length < 6) { toast('Senha deve ter ao menos 6 caracteres.', 'err'); return }
+    setSaving(true)
+    try {
+      await api.addClientUser(profile, clientId, newUser.email.trim(), newUser.password, newUser.name.trim())
+      toast('Acesso criado com sucesso!', 'ok')
+      setNewUser({ name: '', email: '', password: '' })
+      setShowAddForm(false)
+      await load()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  const removeUser = async (cu) => {
+    if (!window.confirm(`Remover o acesso de ${cu.name}?`)) return
+    try {
+      await api.removeClientUser(cu.id)
+      toast('Acesso removido.', 'ok')
+      await load()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  return (
+    <div style={{ background: 'var(--sap1)', padding: 14, borderRadius: 10, marginTop: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div style={{ fontWeight: 700, color: 'var(--sap7)' }}>Acessos ao Sistema ({users.length})</div>
+        <button className="btn bo bsm" onClick={() => setShowAddForm(!showAddForm)}>
+          {showAddForm ? <><Icon n="x" s={13} /> Cancelar</> : <><Icon n="plus" s={13} /> Adicionar Acesso</>}
+        </button>
+      </div>
+
+      {loading ? (
+        <div style={{ fontSize: 13, color: 'var(--mist)', textAlign: 'center', padding: 10 }}>Carregando...</div>
+      ) : users.length === 0 && !showAddForm ? (
+        <div style={{ fontSize: 13, color: 'var(--mist)', padding: 8 }}>
+          Nenhum acesso criado. Clique em "Adicionar Acesso" para criar.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: showAddForm ? 12 : 0 }}>
+          {users.map(cu => (
+            <div key={cu.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#fff', borderRadius: 6, fontSize: 13 }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>{cu.name || 'Sem nome'}</div>
+                <div style={{ fontSize: 11, color: 'var(--mist)' }}>Criado em {fmtDate(cu.created_at)}</div>
+              </div>
+              <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => removeUser(cu)} title="Remover acesso">
+                <Icon n="trash" s={13} c="var(--err)" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showAddForm && (
+        <div style={{ background: '#fff', padding: 12, borderRadius: 8, border: '1px solid var(--fog)' }}>
+          <div className="fg" style={{ marginBottom: 8 }}>
+            <label className="fl">Nome do usuário *</label>
+            <input className="fc" value={newUser.name} onChange={e => setNewUser({ ...newUser, name: e.target.value })} placeholder="Ex: João da Silva" />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div className="fg" style={{ marginBottom: 8 }}>
+              <label className="fl">E-mail *</label>
+              <input className="fc" type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} placeholder="usuario@email.com" />
+            </div>
+            <div className="fg" style={{ marginBottom: 8 }}>
+              <label className="fl">Senha *</label>
+              <input className="fc" type="text" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} placeholder="Mínimo 6 caracteres" />
+            </div>
+          </div>
+          <button className="btn bb bsm" onClick={addUser} disabled={saving} style={{ width: '100%' }}>
+            {saving ? <><span className="spinner"></span> Criando</> : 'Criar Acesso'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CLIENTS PAGE
+// ═══════════════════════════════════════════════════════════════
 function ClientsPage({ profile, clients, onChange, toast }) {
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState(null)
@@ -570,10 +778,12 @@ function ClientsPage({ profile, clients, onChange, toast }) {
                   )}
                 </div>
               )}
-              {editId && clients.find(c => c.id === editId)?.user_id && (
-                <div style={{ background: '#dcfce7', padding: 12, borderRadius: 8, marginTop: 8, fontSize: 13, color: '#15803d' }}>
-                  ✓ Este cliente possui acesso ativo ao sistema
-                </div>
+              {editId && (
+                <ClientUsersManager
+                  profile={profile}
+                  clientId={editId}
+                  toast={toast}
+                />
               )}
             </div>
             <div className="mfoot">
@@ -678,6 +888,12 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
   const [selectedIds, setSelectedIds] = useState([])
   const [showSaleModal, setShowSaleModal] = useState(false)
   const [filterStatus, setFilterStatus] = useState('available')
+  const [filterMaterial, setFilterMaterial] = useState('')
+  const [filterQuarry, setFilterQuarry] = useState('')
+  const [detailBlock, setDetailBlock] = useState(null)
+  const [reserveTarget, setReserveTarget] = useState(null)
+  const [reserveClientId, setReserveClientId] = useState('')
+  const [mobileGrid2, setMobileGrid2] = useState(false)
 
   const emptyForm = {
     code: '', quarry_id: '', material: '', classification: 'A',
@@ -711,7 +927,6 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
     const files = Array.from(e.target.files || [])
     if (!files.length) return
 
-    // Validate file sizes (max 5MB each)
     for (const f of files) {
       if (f.size > 5 * 1024 * 1024) {
         toast(`Foto "${f.name}" muito grande (máx. 5MB)`, 'err')
@@ -787,11 +1002,37 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
     try { await api.deleteBlock(b.id); await onChange(); toast('Bloco excluído.', 'ok') } catch (e) { toast('Erro: ' + e.message, 'err') }
   }
 
+  const confirmReserve = async () => {
+    if (!reserveClientId) { toast('Selecione o cliente.', 'err'); return }
+    try {
+      await api.reserveBlock(reserveTarget.id, reserveClientId)
+      await onChange()
+      toast(`Bloco ${reserveTarget.code} reservado.`, 'ok')
+      setReserveTarget(null); setReserveClientId('')
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const unreserve = async (b) => {
+    if (!window.confirm(`Desfazer reserva do bloco ${b.code}?`)) return
+    try {
+      await api.unreserveBlock(b.id)
+      await onChange()
+      toast('Reserva desfeita.', 'ok')
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
   const STATUS_CLR = { produced: '#64748b', available: '#10b981', reserved: '#f59e0b', sold: '#ef4444' }
   const STATUS_LBL = { produced: 'Produzido', available: 'Disponível', reserved: 'Reservado', sold: 'Vendido' }
 
-  // Filter blocks by status
-  const filteredBlocks = blocks.filter(b => !filterStatus || b.status === filterStatus)
+  // ─── FILTERS ────────────────────────────────────────────────
+  // Unique materials and quarries for filter dropdowns
+  const allMaterials = [...new Set(blocks.map(b => b.material).filter(Boolean))].sort()
+  const filteredBlocks = blocks.filter(b => {
+    if (filterStatus && b.status !== filterStatus) return false
+    if (filterMaterial && b.material !== filterMaterial) return false
+    if (filterQuarry && b.quarry_id !== filterQuarry) return false
+    return true
+  })
 
   // Selection logic
   const toggleSelect = (id) => {
@@ -799,6 +1040,20 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
   }
   const clearSelection = () => setSelectedIds([])
   const selectedBlocks = blocks.filter(b => selectedIds.includes(b.id))
+
+  // Owner pode tudo, foreman cadastra/edita, seller só vende
+  const canEdit = profile.role === 'owner' || profile.role === 'foreman'
+  const canSell = profile.role === 'owner' || profile.role === 'seller'
+  const canReserve = profile.role === 'owner' || profile.role === 'seller'
+
+  // Grid style: on mobile, 1 or 2 columns based on toggle; desktop always 280px
+  const gridStyle = {
+    display: 'grid',
+    gap: 14,
+    gridTemplateColumns: mobileGrid2
+      ? 'repeat(auto-fill,minmax(140px,1fr))'
+      : 'repeat(auto-fill,minmax(280px,1fr))',
+  }
 
   return (
     <div>
@@ -809,7 +1064,7 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
             <div className="psub">{filteredBlocks.length} bloco(s) · {blocks.length} total</div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {selectedIds.length > 0 && (profile.role === 'owner' || profile.role === 'seller') && (
+            {selectedIds.length > 0 && canSell && (
               <>
                 <button className="btn bg" onClick={() => setShowSaleModal(true)}>
                   <Icon n="cart" s={16} c="#fff" /> Vender {selectedIds.length} bloco(s)
@@ -819,15 +1074,22 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
                 </button>
               </>
             )}
-            {(profile.role === 'owner' || profile.role === 'foreman') && (
+            {canEdit && (
               <button className="btn bb" onClick={openNew}><Icon n="plus" s={16} c="#fff" /> Novo Bloco</button>
             )}
           </div>
         </div>
       </div>
 
+      {/* Mobile grid toggle - only visible on mobile */}
+      <div className="mobile-only" style={{ display: 'none', marginBottom: 12 }}>
+        <button className="btn bo bsm" onClick={() => setMobileGrid2(!mobileGrid2)}>
+          {mobileGrid2 ? '☰ Ver 1 por linha' : '⊞ Ver 2 por linha'}
+        </button>
+      </div>
+
       {/* Status filter */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         {[
           { v: '', l: 'Todos', cnt: blocks.length },
           { v: 'available', l: 'Disponíveis', cnt: blocks.filter(b => b.status === 'available').length },
@@ -840,40 +1102,67 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
         ))}
       </div>
 
+      {/* Material/Quarry filters */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+          <option value="">Todos os materiais</option>
+          {allMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+          <option value="">Todas as pedreiras</option>
+          {quarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+        </select>
+        {(filterMaterial || filterQuarry) && (
+          <button className="btn bo bsm" onClick={() => { setFilterMaterial(''); setFilterQuarry('') }}>
+            <Icon n="x" s={13} /> Limpar filtros
+          </button>
+        )}
+      </div>
+
       {filteredBlocks.length === 0
-        ? <div className="es"><div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div><div className="estit">Nenhum bloco {filterStatus ? STATUS_LBL[filterStatus].toLowerCase() : 'cadastrado'}</div></div>
-        : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 14 }}>
+        ? <div className="es"><div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div><div className="estit">Nenhum bloco encontrado</div></div>
+        : <div style={gridStyle}>
           {filteredBlocks.map(b => {
             const q = quarries.find(x => x.id === b.quarry_id)
             const isSelected = selectedIds.includes(b.id)
-            const canSell = b.status === 'available' && (profile.role === 'owner' || profile.role === 'seller')
+            const isSelectable = b.status === 'available' && canSell
             return (
               <div key={b.id} className="card" style={{ position: 'relative', ...(isSelected && { boxShadow: '0 0 0 3px var(--sap5)', borderColor: 'var(--sap5)' }) }}>
-                {canSell && (
-                  <div onClick={() => toggleSelect(b.id)} style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, width: 28, height: 28, background: isSelected ? 'var(--sap6)' : 'rgba(255,255,255,.9)', border: '2px solid ' + (isSelected ? 'var(--sap6)' : 'var(--fog)'), borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                {isSelectable && (
+                  <div onClick={() => toggleSelect(b.id)} style={{ position: 'absolute', top: 8, left: 8, zIndex: 2, width: 28, height: 28, background: isSelected ? 'var(--sap6)' : 'rgba(255,255,255,.9)', border: '2px solid ' + (isSelected ? 'var(--sap6)' : 'var(--fog)'), borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                     {isSelected && <Icon n="check" s={14} c="#fff" />}
                   </div>
                 )}
+                {/* View detail icon */}
+                <button onClick={() => setDetailBlock(b)} title="Ver detalhes" style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, width: 28, height: 28, background: 'rgba(255,255,255,.95)', border: '1px solid var(--fog)', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  🔍
+                </button>
+
                 {b.photos && b.photos.length > 0 && b.photos[0]
-                  ? <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 160, objectFit: 'cover', background: 'var(--haze)' }} onError={(e) => { e.target.style.display = 'none'; e.target.nextElementSibling.style.display = 'flex' }} />
-                  : null}
-                {(!b.photos || !b.photos.length || !b.photos[0]) && <div style={{ height: 100, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>}
-                <div style={{ height: 100, background: 'var(--haze)', display: 'none', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
+                  ? <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: mobileGrid2 ? 110 : 160, objectFit: 'cover', background: 'var(--haze)', cursor: 'pointer' }} onClick={() => setDetailBlock(b)} onError={(e) => { e.target.style.display = 'none' }} />
+                  : <div style={{ height: mobileGrid2 ? 100 : 130, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>}
                 <div className="cb">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15 }}>{b.code}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 4 }}>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: mobileGrid2 ? 13 : 15 }}>{b.code}</div>
                     <span className="bdg" style={{ background: STATUS_CLR[b.status] + '20', color: STATUS_CLR[b.status] }}>{STATUS_LBL[b.status]}</span>
                   </div>
-                  <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 8 }}>{b.material}</div>
-                  <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 10 }}>📍 {q?.name || '—'} · Vol. {(b.net_volume || 0).toFixed(2)} m³</div>
-                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, color: 'var(--sap7)', marginBottom: 10 }}>{money(b.total_value, b.currency)}</div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {(profile.role === 'owner' || profile.role === 'foreman') && (
-                      <>
-                        <button className="btn bo bsm" onClick={() => openEdit(b)}><Icon n="edit" s={13} /> Editar</button>
-                        <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => del(b)}><Icon n="trash" s={13} c="var(--err)" /></button>
-                      </>
+                  <div style={{ fontSize: mobileGrid2 ? 12 : 13, color: 'var(--mist)', marginBottom: 6 }}>{b.material}</div>
+                  {b.status === 'reserved' && b.reserved_client && (
+                    <div style={{ fontSize: 11, color: '#92400e', marginBottom: 6, background: '#fef3c7', padding: '3px 6px', borderRadius: 4, fontWeight: 600 }}>
+                      🔒 Reservado para {b.reserved_client.name}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 10 }}>📍 {q?.name || '—'} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: mobileGrid2 ? 14 : 16, color: 'var(--sap7)', marginBottom: 10 }}>{money(b.total_value, b.currency)}</div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {canEdit && <button className="btn bo bsm" onClick={() => openEdit(b)} title="Editar"><Icon n="edit" s={13} /></button>}
+                    {canReserve && b.status === 'available' && (
+                      <button className="btn bo bsm" onClick={() => setReserveTarget(b)} title="Reservar" style={{ color: '#d97706' }}>🔒</button>
                     )}
+                    {canReserve && b.status === 'reserved' && (
+                      <button className="btn bo bsm" onClick={() => unreserve(b)} title="Desfazer reserva">🔓</button>
+                    )}
+                    {canEdit && <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => del(b)} title="Excluir"><Icon n="trash" s={13} c="var(--err)" /></button>}
                   </div>
                 </div>
               </div>
@@ -898,12 +1187,48 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
         />
       )}
 
+      {/* Reserve modal */}
+      {reserveTarget && (
+        <div className="mo" onClick={() => { setReserveTarget(null); setReserveClientId('') }}>
+          <div className="md" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div className="mtit">🔒 Reservar Bloco</div>
+              <button className="btn bo bsm" onClick={() => { setReserveTarget(null); setReserveClientId('') }}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              <div style={{ marginBottom: 14, padding: 12, background: 'var(--haze)', borderRadius: 8 }}>
+                <strong style={{ color: 'var(--sap7)' }}>{reserveTarget.code}</strong>
+                <span style={{ color: 'var(--mist)', marginLeft: 8 }}>· {reserveTarget.material}</span>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, color: 'var(--sap7)', marginTop: 4 }}>{money(reserveTarget.total_value, reserveTarget.currency)}</div>
+              </div>
+              <div className="fg">
+                <label className="fl">Reservar para o cliente *</label>
+                <select className="fc" value={reserveClientId} onChange={e => setReserveClientId(e.target.value)}>
+                  <option value="">Selecione o cliente...</option>
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name} ({c.country})</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={() => { setReserveTarget(null); setReserveClientId('') }}>Cancelar</button>
+              <button className="btn bb" onClick={confirmReserve}>Confirmar Reserva</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Detail modal */}
+      {detailBlock && (
+        <BlockDetailModal block={detailBlock} quarry={quarries.find(q => q.id === detailBlock.quarry_id)} onClose={() => setDetailBlock(null)} />
+      )}
+
+      {/* Form modal */}
       {showForm && (
         <div className="mo" onClick={() => setShowForm(false)}>
           <div className="md" style={{ maxWidth: 760 }} onClick={e => e.stopPropagation()}>
             <div className="mhead"><div className="mtit">{editId ? 'Editar' : 'Novo'} Bloco</div><button className="btn bo bsm" onClick={() => setShowForm(false)}><Icon n="x" s={14} /></button></div>
             <div className="mbody">
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="fg"><label className="fl">Código *</label><input className="fc" value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} placeholder="Ex: VMC-001" /></div>
                 <div className="fg"><label className="fl">Pedreira *</label>
                   <select className="fc" value={form.quarry_id} onChange={e => setForm({ ...form, quarry_id: e.target.value, material: '' })}>
@@ -912,7 +1237,7 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
                   </select>
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12 }}>
+              <div className="responsive-grid-3-mat" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12 }}>
                 <div className="fg"><label className="fl">Material *</label>
                   {(() => {
                     const selectedQuarry = quarries.find(q => q.id === form.quarry_id)
@@ -959,7 +1284,7 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}>
+              <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}>
                 <div className="fg"><label className="fl">Moeda</label>
                   <select className="fc" value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}>
                     <option value="BRL">BRL (R$)</option><option value="USD">USD (US$)</option>
@@ -1007,8 +1332,123 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SALE MODAL — registrar venda de blocos selecionados
+// BLOCK DETAIL MODAL — visualizar ficha completa do bloco
 // ═══════════════════════════════════════════════════════════════
+function BlockDetailModal({ block, quarry, onClose }) {
+  const [photoIdx, setPhotoIdx] = useState(0)
+  const photos = (block.photos || []).filter(Boolean)
+
+  const STATUS_CLR = { produced: '#64748b', available: '#10b981', reserved: '#f59e0b', sold: '#ef4444' }
+  const STATUS_LBL = { produced: 'Produzido', available: 'Disponível', reserved: 'Reservado', sold: 'Vendido' }
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 800 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div>
+            <div className="mtit">{block.code}</div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>{block.material}</div>
+          </div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          {/* Photos carousel */}
+          {photos.length > 0 ? (
+            <div style={{ marginBottom: 16 }}>
+              <img src={photos[photoIdx]} alt="" style={{ width: '100%', maxHeight: 360, objectFit: 'contain', background: 'var(--haze)', borderRadius: 8 }} />
+              {photos.length > 1 && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, overflowX: 'auto' }}>
+                  {photos.map((url, i) => (
+                    <img key={i} src={url} alt="" onClick={() => setPhotoIdx(i)} style={{ width: 70, height: 70, objectFit: 'cover', borderRadius: 6, cursor: 'pointer', flexShrink: 0, border: '2px solid ' + (i === photoIdx ? 'var(--sap6)' : 'transparent') }} />
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ height: 200, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, marginBottom: 16 }}>
+              <Icon n="cube" s={48} c="var(--mist)" />
+            </div>
+          )}
+
+          {/* Status row */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+            <span className="bdg" style={{ background: STATUS_CLR[block.status] + '20', color: STATUS_CLR[block.status], padding: '6px 12px', fontSize: 13 }}>
+              {STATUS_LBL[block.status]}
+            </span>
+            <span className="bdg" style={{ background: 'var(--sap1)', color: 'var(--sap7)', padding: '6px 12px', fontSize: 13 }}>
+              Classificação {block.classification}
+            </span>
+            {block.status === 'reserved' && block.reserved_client && (
+              <span className="bdg" style={{ background: '#fef3c7', color: '#92400e', padding: '6px 12px', fontSize: 13 }}>
+                🔒 Reservado para {block.reserved_client.name}
+              </span>
+            )}
+          </div>
+
+          {/* Info grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10, marginBottom: 16 }}>
+            <div className="sc" style={{ padding: 12 }}>
+              <div className="slbl2">Pedreira</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14 }}>{quarry?.name || '—'}</div>
+              {quarry?.location && <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 2 }}>{quarry.location}</div>}
+            </div>
+            <div className="sc" style={{ padding: 12, borderTopColor: 'var(--ok)' }}>
+              <div className="slbl2">Volume Líquido</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{(block.net_volume || 0).toFixed(2)} m³</div>
+            </div>
+            <div className="sc" style={{ padding: 12, borderTopColor: 'var(--warn)' }}>
+              <div className="slbl2">Data de Produção</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14 }}>{fmtDate(block.prod_date)}</div>
+            </div>
+            <div className="sc" style={{ padding: 12, borderTopColor: 'var(--sap5)' }}>
+              <div className="slbl2">Preço m³</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14 }}>{money(block.price_m3, block.currency)}</div>
+            </div>
+          </div>
+
+          {/* Measurements */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+            <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 6 }}>Medidas Brutas</div>
+              <div style={{ fontSize: 13 }}>C: {block.gross_l || '—'} m</div>
+              <div style={{ fontSize: 13 }}>A: {block.gross_h || '—'} m</div>
+              <div style={{ fontSize: 13 }}>L: {block.gross_w || '—'} m</div>
+              <div style={{ fontSize: 13, marginTop: 4, fontWeight: 700 }}>Vol: {(block.gross_volume || 0).toFixed(2)} m³</div>
+            </div>
+            <div style={{ background: '#dcfce7', padding: 12, borderRadius: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: '#15803d', marginBottom: 6 }}>Medidas Líquidas</div>
+              <div style={{ fontSize: 13 }}>C: {block.net_l || '—'} m</div>
+              <div style={{ fontSize: 13 }}>A: {block.net_h || '—'} m</div>
+              <div style={{ fontSize: 13 }}>L: {block.net_w || '—'} m</div>
+              <div style={{ fontSize: 13, marginTop: 4, fontWeight: 700, color: '#15803d' }}>Vol: {(block.net_volume || 0).toFixed(2)} m³</div>
+            </div>
+          </div>
+
+          {/* Total value */}
+          <div style={{ background: 'var(--sap1)', padding: 18, borderRadius: 10, textAlign: 'center', marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: 'var(--sap7)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Valor Total</div>
+            <div style={{ fontFamily: 'Sora,sans-serif', fontSize: 32, fontWeight: 800, color: 'var(--sap7)' }}>{money(block.total_value, block.currency)}</div>
+          </div>
+
+          {block.sys_code && (
+            <div style={{ fontSize: 11, color: 'var(--mist)', textAlign: 'center', marginBottom: 8 }}>
+              Código do sistema: <code style={{ background: 'var(--haze)', padding: '2px 6px', borderRadius: 3 }}>{block.sys_code}</code>
+            </div>
+          )}
+
+          {block.notes && (
+            <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8, fontSize: 13 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 4 }}>Observações</div>
+              {block.notes}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 function SaleModal({ profile, selectedBlocks, clients, payments, onClose, onSuccess, toast }) {
   const [clientId, setClientId] = useState('')
   const [paymentId, setPaymentId] = useState('')
@@ -1178,6 +1618,7 @@ function SalesPage({ profile, sales, blocks, onChange, toast }) {
   const [dtInicio, setDtInicio] = useState('')
   const [dtFim, setDtFim] = useState('')
   const [filterClient, setFilterClient] = useState('')
+  const [detailSale, setDetailSale] = useState(null)
 
   const today = new Date().toISOString().slice(0, 10)
 
@@ -1268,7 +1709,7 @@ function SalesPage({ profile, sales, blocks, onChange, toast }) {
           </tr></thead>
           <tbody>
             {filtered.map(s => (
-              <tr key={s.id}>
+              <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => setDetailSale(s)}>
                 <td style={{ fontSize: 13, color: 'var(--mist)' }}>{fmtDate(s.created_at)}</td>
                 <td style={{ fontWeight: 600 }}>{s.client?.name || '—'}</td>
                 <td>
@@ -1284,7 +1725,7 @@ function SalesPage({ profile, sales, blocks, onChange, toast }) {
                 {profile.role !== 'seller' && <td style={{ fontSize: 13 }}>{s.seller?.name || '—'}</td>}
                 <td style={{ fontWeight: 700, color: '#059669' }}>{s.total_brl > 0 ? money(s.total_brl, 'BRL') : '—'}</td>
                 <td style={{ fontWeight: 700, color: 'var(--sap7)' }}>{s.total_usd > 0 ? money(s.total_usd, 'USD') : '—'}</td>
-                <td>
+                <td onClick={e => e.stopPropagation()}>
                   {(profile.role === 'owner' || profile.role === 'seller') && (
                     <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => reverse(s)} title="Estornar">
                       <Icon n="trash" s={13} c="var(--err)" />
@@ -1295,6 +1736,92 @@ function SalesPage({ profile, sales, blocks, onChange, toast }) {
             ))}
           </tbody>
         </table></div></div>}
+
+      {detailSale && (
+        <div className="mo" onClick={() => setDetailSale(null)}>
+          <div className="md" style={{ maxWidth: 680 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div>
+                <div className="mtit">Detalhes da Venda</div>
+                <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>{fmtDate(detailSale.created_at)}</div>
+              </div>
+              <button className="btn bo bsm" onClick={() => setDetailSale(null)}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              {/* Cliente / Vendedor / Pagamento */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 10, marginBottom: 16 }}>
+                <div className="sc" style={{ padding: 12 }}>
+                  <div className="slbl2">Cliente</div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14 }}>{detailSale.client?.name || '—'}</div>
+                  {detailSale.client?.country && <div style={{ fontSize: 11, color: 'var(--mist)' }}>{detailSale.client.country}</div>}
+                </div>
+                <div className="sc" style={{ padding: 12, borderTopColor: 'var(--sap5)' }}>
+                  <div className="slbl2">Vendedor</div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14 }}>{detailSale.seller?.name || '—'}</div>
+                </div>
+                {detailSale.payment_method && (
+                  <div className="sc" style={{ padding: 12, borderTopColor: 'var(--ok)' }}>
+                    <div className="slbl2">Pagamento</div>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14 }}>{detailSale.payment_method.name}</div>
+                  </div>
+                )}
+                {detailSale.dollar_rate && (
+                  <div className="sc" style={{ padding: 12, borderTopColor: 'var(--warn)' }}>
+                    <div className="slbl2">Cotação USD</div>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14 }}>R$ {Number(detailSale.dollar_rate).toFixed(4)}</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Blocos vendidos */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 8 }}>
+                  Blocos vendidos ({(detailSale.blocks || []).length})
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {(detailSale.blocks || []).map(b => (
+                    <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 10, background: 'var(--haze)', borderRadius: 8 }}>
+                      {b.photos && b.photos[0] && (
+                        <img src={b.photos[0]} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 6 }} />
+                      )}
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, color: 'var(--sap7)' }}>{b.code}</div>
+                        <div style={{ fontSize: 12, color: 'var(--mist)' }}>{b.material} · Classif. {b.classification} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                      </div>
+                      <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, color: 'var(--sap7)' }}>
+                        {money(b.total_value, b.currency)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Totais */}
+              <div style={{ background: 'var(--sap1)', padding: 16, borderRadius: 10, marginBottom: 14 }}>
+                {detailSale.total_brl > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
+                    <span>Total R$:</span>
+                    <strong style={{ fontFamily: 'Sora,sans-serif', fontSize: 18 }}>{money(detailSale.total_brl, 'BRL')}</strong>
+                  </div>
+                )}
+                {detailSale.total_usd > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                    <span>Total US$:</span>
+                    <strong style={{ fontFamily: 'Sora,sans-serif', fontSize: 18 }}>{money(detailSale.total_usd, 'USD')}</strong>
+                  </div>
+                )}
+              </div>
+
+              {detailSale.obs && (
+                <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8, fontSize: 13 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 4 }}>Observações</div>
+                  {detailSale.obs}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1437,8 +1964,8 @@ function TeamPage({ profile, team, onChange, toast }) {
             <div className="mbody">
               <div className="fg"><label className="fl">Função *</label>
                 <select className="fc" value={newForm.role} onChange={e => setNewForm({ ...newForm, role: e.target.value })}>
-                  <option value="seller">Vendedor (vende blocos e pode dar comissão)</option>
-                  <option value="foreman">Encarregado (cadastra e edita blocos)</option>
+                  <option value="seller">Vendedor</option>
+                  <option value="foreman">Encarregado</option>
                 </select>
               </div>
               <div className="fg"><label className="fl">Nome *</label>
@@ -1497,9 +2024,9 @@ function TeamPage({ profile, team, onChange, toast }) {
               </div>
               <div className="fg"><label className="fl">Função</label>
                 <select className="fc" value={editForm.role} onChange={e => setEditForm({ ...editForm, role: e.target.value })}>
-                  <option value="foreman">Encarregado (cadastra e edita blocos)</option>
-                  <option value="seller">Vendedor (vende blocos)</option>
-                  <option value="client">Cliente (vê o catálogo)</option>
+                  <option value="foreman">Encarregado</option>
+                  <option value="seller">Vendedor</option>
+                  <option value="client">Cliente</option>
                 </select>
               </div>
               {editForm.role === 'seller' && (
@@ -1734,60 +2261,105 @@ function ReleasesPage({ profile, blocks, clients, releases, onChange, toast }) {
 // ═══════════════════════════════════════════════════════════════
 // CLIENT CATALOG — visão do cliente, vê blocos liberados para ele
 // ═══════════════════════════════════════════════════════════════
-function CatalogPage({ profile, catalog, toast }) {
+function CatalogPage({ profile, catalog, favorites, onChange, toast }) {
   const [selected, setSelected] = useState(null)
+  const [showOrderForm, setShowOrderForm] = useState(false)
+  const [orderMessage, setOrderMessage] = useState('')
+  const [filterFavOnly, setFilterFavOnly] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   const STATUS_LBL = { available: 'Disponível', reserved: 'Reservado' }
   const STATUS_CLR = { available: '#10b981', reserved: '#f59e0b' }
 
+  const filteredCatalog = filterFavOnly ? catalog.filter(b => favorites.includes(b.id)) : catalog
+
+  const handleFavorite = async (blockId) => {
+    try {
+      await api.toggleFavorite(profile, blockId)
+      await onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const sendOrder = async () => {
+    if (!selected) return
+    setSaving(true)
+    try {
+      await api.createClientOrder(profile, selected.id, orderMessage.trim() || null)
+      toast('Pedido enviado! O vendedor entrará em contato.', 'ok')
+      setShowOrderForm(false)
+      setSelected(null)
+      setOrderMessage('')
+      await onChange()
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setSaving(false) }
+  }
+
   return (
     <div>
       <div className="ph">
-        <div className="ptit">Catálogo</div>
-        <div className="psub">{catalog.length} bloco(s) disponível(is) para você</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="ptit">Catálogo</div>
+            <div className="psub">
+              {filterFavOnly ? `${filteredCatalog.length} favorito(s)` : `${catalog.length} bloco(s) disponível(is)`}
+            </div>
+          </div>
+          <button className={'btn ' + (filterFavOnly ? 'bb' : 'bo')} onClick={() => setFilterFavOnly(!filterFavOnly)}>
+            ⭐ {filterFavOnly ? 'Ver todos' : `Favoritos (${favorites.length})`}
+          </button>
+        </div>
       </div>
 
-      {catalog.length === 0 ? (
+      {filteredCatalog.length === 0 ? (
         <div className="es">
           <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
-          <div className="estit">Nenhum bloco disponível ainda</div>
+          <div className="estit">{filterFavOnly ? 'Nenhum favorito ainda' : 'Nenhum bloco disponível'}</div>
           <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>
-            Quando blocos forem liberados para você, aparecerão aqui.
+            {filterFavOnly ? 'Marque blocos como ⭐ para vê-los aqui.' : 'Quando blocos forem liberados, aparecerão aqui.'}
           </div>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 14 }}>
-          {catalog.map(b => (
-            <div key={b.id} className="card" style={{ cursor: 'pointer' }} onClick={() => setSelected(b)}>
-              {b.photos && b.photos.length > 0 && b.photos[0] ? (
-                <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 200, objectFit: 'cover', background: 'var(--haze)' }} />
-              ) : (
-                <div style={{ height: 200, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon n="cube" s={40} c="var(--mist)" />
+          {filteredCatalog.map(b => {
+            const isFav = favorites.includes(b.id)
+            return (
+              <div key={b.id} className="card" style={{ cursor: 'pointer', position: 'relative' }} onClick={() => setSelected(b)}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleFavorite(b.id) }}
+                  style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, width: 36, height: 36, background: isFav ? '#fef3c7' : 'rgba(255,255,255,.9)', border: '1px solid ' + (isFav ? '#fde68a' : 'var(--fog)'), borderRadius: 8, cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {isFav ? '⭐' : '☆'}
+                </button>
+                {b.photos && b.photos.length > 0 && b.photos[0] ? (
+                  <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 200, objectFit: 'cover', background: 'var(--haze)' }} />
+                ) : (
+                  <div style={{ height: 200, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon n="cube" s={40} c="var(--mist)" />
+                  </div>
+                )}
+                <div className="cb">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15 }}>{b.code}</div>
+                    <span className="bdg" style={{ background: STATUS_CLR[b.status] + '20', color: STATUS_CLR[b.status] }}>{STATUS_LBL[b.status]}</span>
+                  </div>
+                  <div style={{ fontSize: 14, color: 'var(--ink)', marginBottom: 4, fontWeight: 600 }}>{b.material}</div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 4 }}>Classificação {b.classification}</div>
+                  <div style={{ fontSize: 12, color: 'var(--mist)', marginBottom: 10 }}>Vol. {(b.net_volume || 0).toFixed(2)} m³</div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 18, color: 'var(--sap7)' }}>{money(b.total_value, b.currency)}</div>
                 </div>
-              )}
-              <div className="cb">
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15 }}>{b.code}</div>
-                  <span className="bdg" style={{ background: STATUS_CLR[b.status] + '20', color: STATUS_CLR[b.status] }}>{STATUS_LBL[b.status]}</span>
-                </div>
-                <div style={{ fontSize: 14, color: 'var(--ink)', marginBottom: 4, fontWeight: 600 }}>{b.material}</div>
-                <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 4 }}>Classificação {b.classification}</div>
-                <div style={{ fontSize: 12, color: 'var(--mist)', marginBottom: 10 }}>Vol. {(b.net_volume || 0).toFixed(2)} m³</div>
-                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 18, color: 'var(--sap7)' }}>{money(b.total_value, b.currency)}</div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
       {/* Detail modal */}
       {selected && (
-        <div className="mo" onClick={() => setSelected(null)}>
+        <div className="mo" onClick={() => { setSelected(null); setShowOrderForm(false) }}>
           <div className="md" style={{ maxWidth: 700 }} onClick={e => e.stopPropagation()}>
             <div className="mhead">
               <div className="mtit">{selected.code} — {selected.material}</div>
-              <button className="btn bo bsm" onClick={() => setSelected(null)}><Icon n="x" s={14} /></button>
+              <button className="btn bo bsm" onClick={() => { setSelected(null); setShowOrderForm(false) }}><Icon n="x" s={14} /></button>
             </div>
             <div className="mbody">
               {selected.photos && selected.photos.length > 0 && (
@@ -1816,20 +2388,331 @@ function CatalogPage({ profile, catalog, toast }) {
                 <div style={{ fontFamily: 'Sora,sans-serif', fontSize: 30, fontWeight: 800, color: 'var(--sap7)' }}>{money(selected.total_value, selected.currency)}</div>
               </div>
               {selected.quarry && (
-                <div style={{ fontSize: 13, color: 'var(--mist)', textAlign: 'center', marginBottom: 10 }}>
+                <div style={{ fontSize: 13, color: 'var(--mist)', textAlign: 'center', marginBottom: 14 }}>
                   📍 {selected.quarry.name} {selected.quarry.location && ' · ' + selected.quarry.location}
                 </div>
               )}
               {selected.notes && (
-                <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8, fontSize: 13 }}>
+                <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8, fontSize: 13, marginBottom: 14 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 4 }}>Observações</div>
                   {selected.notes}
                 </div>
+              )}
+
+              {showOrderForm ? (
+                <div style={{ background: '#fefce8', border: '1px solid #fde68a', padding: 14, borderRadius: 10 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 10, color: '#854d0e' }}>Enviar pedido de interesse</div>
+                  <textarea
+                    className="fc"
+                    value={orderMessage}
+                    onChange={e => setOrderMessage(e.target.value)}
+                    placeholder="Mensagem opcional (ex: quero negociar o preço, preciso urgente, etc.)"
+                    style={{ minHeight: 80 }} />
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button className="btn bo" onClick={() => setShowOrderForm(false)}>Cancelar</button>
+                    <button className="btn bg" onClick={sendOrder} disabled={saving}>
+                      {saving ? <><span className="spinner"></span> Enviando</> : <><Icon n="check" s={14} c="#fff" /> Enviar Pedido</>}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button className="btn bg" onClick={() => setShowOrderForm(true)} style={{ width: '100%' }}>
+                  <Icon n="cart" s={16} c="#fff" /> Tenho Interesse — Enviar Pedido
+                </button>
               )}
             </div>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ORDERS PAGE — pedidos de interesse dos clientes
+// ═══════════════════════════════════════════════════════════════
+function OrdersPage({ profile, orders, onChange, toast }) {
+  const STATUS_LBL = {
+    pending: 'Pendente',
+    approved: 'Aprovado',
+    rejected: 'Rejeitado',
+    purchase_request: 'Solicitação',
+  }
+  const STATUS_CLR = {
+    pending: '#f59e0b',
+    approved: '#10b981',
+    rejected: '#ef4444',
+    purchase_request: '#3b82f6',
+  }
+
+  const updateStatus = async (id, status) => {
+    try {
+      await api.updateOrderStatus(id, status)
+      await onChange()
+      toast('Status atualizado!', 'ok')
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const pending = orders.filter(o => o.status === 'pending' || o.status === 'purchase_request')
+  const resolved = orders.filter(o => o.status === 'approved' || o.status === 'rejected')
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">Pedidos</div>
+        <div className="psub">{pending.length} pendente(s) · {resolved.length} resolvido(s)</div>
+      </div>
+
+      {orders.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cart" s={48} /></div>
+          <div className="estit">Nenhum pedido recebido</div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {[...orders].sort((a, b) => {
+            const order = { purchase_request: 1, pending: 2, approved: 3, rejected: 4 }
+            return (order[a.status] || 5) - (order[b.status] || 5)
+          }).map(o => {
+            const isPending = o.status === 'pending' || o.status === 'purchase_request'
+            return (
+              <div key={o.id} className="card" style={{ borderLeft: '4px solid ' + STATUS_CLR[o.status] }}>
+                <div className="cb">
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
+                    {o.block?.photos && o.block.photos[0] && (
+                      <img src={o.block.photos[0]} alt="" style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8 }} />
+                    )}
+                    <div style={{ flex: 1, minWidth: 220 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                        <strong style={{ color: 'var(--sap7)', fontSize: 15 }}>{o.block?.code || '—'}</strong>
+                        <span style={{ color: 'var(--mist)' }}>{o.block?.material}</span>
+                        <span className="bdg" style={{ background: STATUS_CLR[o.status] + '20', color: STATUS_CLR[o.status] }}>
+                          {STATUS_LBL[o.status]}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 13, marginBottom: 6 }}>
+                        <strong>Cliente:</strong> {o.client?.name || '—'}
+                      </div>
+                      <div style={{ fontSize: 13, marginBottom: 6 }}>
+                        <strong>Valor:</strong> {money(o.block?.total_value, o.block?.currency)}
+                      </div>
+                      {o.message && (
+                        <div style={{ fontSize: 13, background: 'var(--haze)', padding: 10, borderRadius: 6, marginTop: 8 }}>
+                          💬 {o.message}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 8 }}>{fmtDate(o.created_at)}</div>
+                    </div>
+                    {isPending && profile.role !== 'client' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <button className="btn bg bsm" onClick={() => updateStatus(o.id, 'approved')}>
+                          <Icon n="check" s={13} c="#fff" /> Aprovar
+                        </button>
+                        <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => updateStatus(o.id, 'rejected')}>
+                          <Icon n="x" s={13} c="var(--err)" /> Rejeitar
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// COMMISSIONS PAGE — relatório de comissões por vendedor
+// ═══════════════════════════════════════════════════════════════
+function CommissionsPage({ profile, sales, team, toast }) {
+  const [dtInicio, setDtInicio] = useState('')
+  const [dtFim, setDtFim] = useState('')
+  const [expandedSeller, setExpandedSeller] = useState(null)
+
+  const today = new Date().toISOString().slice(0, 10)
+
+  const sellers = team.filter(t => t.role === 'seller')
+
+  const sellerData = sellers.map(s => {
+    const sellerSales = sales.filter(sale => {
+      if (sale.seller_id !== s.id) return false
+      const d = new Date(sale.created_at)
+      if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
+      if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+      return true
+    })
+    const totalBRL = sellerSales.reduce((a, x) => a + (Number(x.total_brl) || 0), 0)
+    const totalUSD = sellerSales.reduce((a, x) => a + (Number(x.total_usd) || 0), 0)
+    const commission = s.commission && s.commission_pct > 0 ? totalBRL * (s.commission_pct / 100) : 0
+    const blockCount = sellerSales.reduce((a, x) => a + (x.block_ids?.length || 0), 0)
+    return { seller: s, sales: sellerSales, totalBRL, totalUSD, commission, blockCount }
+  })
+
+  const grandTotal = sellerData.reduce((a, d) => a + d.totalBRL, 0)
+  const grandCommission = sellerData.reduce((a, d) => a + d.commission, 0)
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">Comissões</div>
+        <div className="psub">
+          {dtInicio || dtFim
+            ? `Período: ${dtInicio ? fmtDate(new Date(dtInicio + 'T12:00:00')) : 'início'} → ${dtFim ? fmtDate(new Date(dtFim + 'T12:00:00')) : 'hoje'}`
+            : 'Todos os períodos'}
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="sg">
+        <div className="sc">
+          <div className="sico" style={{ background: '#dcfce7' }}><Icon n="trend" s={20} c="#059669" /></div>
+          <div className="sval" style={{ fontSize: 20 }}>{money(grandTotal, 'BRL')}</div>
+          <div className="slbl2">Total Vendido</div>
+        </div>
+        <div className="sc" style={{ borderTopColor: 'var(--warn)' }}>
+          <div className="sico" style={{ background: '#fef3c7' }}><Icon n="dolar" s={20} c="#d97706" /></div>
+          <div className="sval" style={{ fontSize: 20 }}>{money(grandCommission, 'BRL')}</div>
+          <div className="slbl2">Total em Comissões</div>
+        </div>
+        <div className="sc" style={{ borderTopColor: 'var(--sap5)' }}>
+          <div className="sico" style={{ background: 'var(--sap1)' }}><Icon n="user" s={20} c="var(--sap7)" /></div>
+          <div className="sval">{sellers.filter(s => s.commission).length}</div>
+          <div className="slbl2">Vendedores c/ comissão</div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="cb" style={{ padding: '14px 18px' }}>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label className="fl" style={{ margin: 0 }}>De</label>
+              <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} max={dtFim || today} onChange={e => setDtInicio(e.target.value)} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label className="fl" style={{ margin: 0 }}>Até</label>
+              <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} min={dtInicio} max={today} onChange={e => setDtFim(e.target.value)} />
+            </div>
+            {(dtInicio || dtFim) && (
+              <button className="btn bo bsm" onClick={() => { setDtInicio(''); setDtFim('') }}>
+                <Icon n="x" s={13} /> Limpar
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Sellers */}
+      {sellerData.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="user" s={48} /></div>
+          <div className="estit">Nenhum vendedor cadastrado</div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {sellerData.map(d => (
+            <div key={d.seller.id} className="card">
+              <div className="cb">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                  <div className="av" style={{ width: 48, height: 48, fontSize: 15, flexShrink: 0 }}>
+                    {d.seller.avatar || d.seller.name?.substring(0, 2).toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 180 }}>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{d.seller.name}</div>
+                    <div style={{ fontSize: 12, color: 'var(--mist)' }}>
+                      {d.sales.length} venda(s) · {d.blockCount} bloco(s) · {d.seller.commission ? `${d.seller.commission_pct}% comissão` : 'sem comissão'}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 11, color: 'var(--mist)' }}>Total vendido</div>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, color: 'var(--sap7)' }}>{money(d.totalBRL, 'BRL')}</div>
+                  </div>
+                  <div style={{ textAlign: 'right', paddingLeft: 14, borderLeft: '1px solid var(--fog)' }}>
+                    <div style={{ fontSize: 11, color: 'var(--mist)' }}>Comissão</div>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 18, color: '#d97706' }}>
+                      {money(d.commission, 'BRL')}
+                    </div>
+                  </div>
+                  {d.sales.length > 0 && (
+                    <button className="btn bo bsm" onClick={() => setExpandedSeller(expandedSeller === d.seller.id ? null : d.seller.id)}>
+                      {expandedSeller === d.seller.id ? '▲ Ocultar' : '▼ Detalhes'}
+                    </button>
+                  )}
+                </div>
+
+                {/* Expanded sales */}
+                {expandedSeller === d.seller.id && (
+                  <div style={{ marginTop: 14, padding: 12, background: 'var(--haze)', borderRadius: 8 }}>
+                    <div className="tw"><table>
+                      <thead><tr>
+                        <th>Data</th><th>Cliente</th><th>Total R$</th><th>Comissão</th>
+                      </tr></thead>
+                      <tbody>
+                        {d.sales.map(s => {
+                          const comm = d.seller.commission && d.seller.commission_pct > 0 ? (s.total_brl || 0) * (d.seller.commission_pct / 100) : 0
+                          return (
+                            <tr key={s.id}>
+                              <td style={{ fontSize: 12, color: 'var(--mist)' }}>{fmtDate(s.created_at)}</td>
+                              <td style={{ fontSize: 13 }}>{s.client?.name || '—'}</td>
+                              <td style={{ fontWeight: 600 }}>{money(s.total_brl, 'BRL')}</td>
+                              <td style={{ fontWeight: 700, color: '#d97706' }}>{comm > 0 ? money(comm, 'BRL') : '—'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table></div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// NOTIFICATIONS PANEL — sino com lista dropdown
+// ═══════════════════════════════════════════════════════════════
+function NotificationsPanel({ profile, notifications, onChange, onClose }) {
+  const unreadCount = notifications.filter(n => !n.read).length
+
+  const markRead = async (id) => {
+    try { await api.markNotificationRead(id); await onChange() } catch {}
+  }
+
+  const markAllRead = async () => {
+    try { await api.markAllNotificationsRead(profile); await onChange() } catch {}
+  }
+
+  return (
+    <div style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: 340, maxHeight: 480, background: '#fff', border: '1px solid var(--fog)', borderRadius: 'var(--r-lg)', boxShadow: '0 12px 30px rgba(0,0,0,.15)', zIndex: 70, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--fog)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15 }}>Notificações</div>
+        {unreadCount > 0 && (
+          <button onClick={markAllRead} style={{ background: 'none', border: 'none', color: 'var(--sap6)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+            Marcar todas como lidas
+          </button>
+        )}
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {notifications.length === 0 ? (
+          <div style={{ padding: 30, textAlign: 'center', color: 'var(--mist)', fontSize: 13 }}>
+            Nenhuma notificação
+          </div>
+        ) : (
+          notifications.slice(0, 30).map(n => (
+            <div key={n.id} onClick={() => !n.read && markRead(n.id)} style={{ padding: '12px 16px', borderBottom: '1px solid var(--fog)', cursor: n.read ? 'default' : 'pointer', background: n.read ? '#fff' : 'var(--sap1)' }}>
+              <div style={{ fontSize: 13, marginBottom: 4, fontWeight: n.read ? 400 : 600 }}>{n.message}</div>
+              <div style={{ fontSize: 11, color: 'var(--mist)' }}>{fmtDate(n.created_at)}</div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   )
 }
@@ -1864,6 +2747,10 @@ export default function App() {
   const [team,     setTeam]       = useState([])
   const [releases, setReleases]   = useState([])
   const [catalog,  setCatalog]    = useState([])
+  const [orders,   setOrders]     = useState([])
+  const [notifications, setNotifications] = useState([])
+  const [favorites,     setFavorites]     = useState([])
+  const [notifOpen,     setNotifOpen]     = useState(false)
 
   const showToast = useCallback((msg, type = '') => {
     setToast({ msg, type })
@@ -1876,12 +2763,17 @@ export default function App() {
     try {
       // If client, load catalog; otherwise load full team data
       if (p.role === 'client') {
-        const cat = await api.listClientCatalog(p)
-        setCatalog(cat)
+        const [cat, ord, notif, favs] = await Promise.all([
+          api.listClientCatalog(p),
+          api.listOrders(p),
+          api.listNotifications(p),
+          api.listClientFavorites(p),
+        ])
+        setCatalog(cat); setOrders(ord); setNotifications(notif); setFavorites(favs)
         // Empty arrays for unused data
         setQuarries([]); setClients([]); setPayments([]); setBlocks([]); setSales([]); setTeam([]); setReleases([])
       } else {
-        const [q, c, pm, b, s, t, r] = await Promise.all([
+        const [q, c, pm, b, s, t, r, ord, notif] = await Promise.all([
           api.listQuarries(p),
           api.listClients(p),
           api.listPaymentMethods(p),
@@ -1889,10 +2781,12 @@ export default function App() {
           api.listSales(p),
           api.listTeam(p),
           api.listBlockReleases(p),
+          api.listOrders(p),
+          api.listNotifications(p),
         ])
         setQuarries(q); setClients(c); setPayments(pm); setBlocks(b)
-        setSales(s); setTeam(t); setReleases(r)
-        setCatalog([])
+        setSales(s); setTeam(t); setReleases(r); setOrders(ord); setNotifications(notif)
+        setCatalog([]); setFavorites([])
       }
     } catch (e) {
       console.error('loadData error:', e)
@@ -1958,7 +2852,7 @@ export default function App() {
     try { await api.signOut() } catch (e) { console.error(e) }
     setProfile(null)
     setBlocks([]); setQuarries([]); setClients([]); setPayments([]); setSales([])
-    setTeam([]); setReleases([]); setCatalog([])
+    setTeam([]); setReleases([]); setCatalog([]); setOrders([]); setNotifications([]); setFavorites([])
   }
 
   if (loading) return (
@@ -1990,14 +2884,16 @@ export default function App() {
   let NAV = []
   if (profile.role === 'owner') {
     NAV = [
-      { p: 'dashboard', l: 'Dashboard',         i: 'grid' },
-      { p: 'blocks',    l: 'Blocos',            i: 'cube' },
-      { p: 'sales',     l: 'Vendas',            i: 'cart' },
-      { p: 'releases',  l: 'Liberar Catálogo',  i: 'check' },
-      { p: 'quarries',  l: 'Pedreiras',         i: 'mtn' },
-      { p: 'team',      l: 'Equipe',            i: 'user' },
-      { p: 'clients',   l: 'Clientes',          i: 'user' },
-      { p: 'payments',  l: 'Pagamentos',        i: 'card' },
+      { p: 'dashboard',   l: 'Dashboard',         i: 'grid' },
+      { p: 'blocks',      l: 'Blocos',            i: 'cube' },
+      { p: 'sales',       l: 'Vendas',            i: 'cart' },
+      { p: 'orders',      l: 'Pedidos',           i: 'cart' },
+      { p: 'releases',    l: 'Liberar Catálogo',  i: 'check' },
+      { p: 'commissions', l: 'Comissões',         i: 'dolar' },
+      { p: 'quarries',    l: 'Pedreiras',         i: 'mtn' },
+      { p: 'team',        l: 'Equipe',            i: 'user' },
+      { p: 'clients',     l: 'Clientes',          i: 'user' },
+      { p: 'payments',    l: 'Pagamentos',        i: 'card' },
     ]
   } else if (profile.role === 'foreman') {
     NAV = [
@@ -2009,30 +2905,34 @@ export default function App() {
       { p: 'dashboard', l: 'Dashboard',         i: 'grid' },
       { p: 'blocks',    l: 'Blocos',            i: 'cube' },
       { p: 'sales',     l: 'Minhas Vendas',     i: 'cart' },
+      { p: 'orders',    l: 'Pedidos',           i: 'cart' },
       { p: 'releases',  l: 'Liberar Catálogo',  i: 'check' },
       { p: 'clients',   l: 'Clientes',          i: 'user' },
     ]
   } else if (profile.role === 'client') {
     NAV = [
-      { p: 'catalog',   l: 'Catálogo',          i: 'cube' },
+      { p: 'catalog', l: 'Catálogo',         i: 'cube' },
+      { p: 'orders',  l: 'Meus Pedidos',     i: 'cart' },
     ]
   }
 
   const renderPage = () => {
     switch (page) {
-      case 'dashboard': return <Dashboard blocks={blocks} quarries={quarries} clients={clients} />
-      case 'blocks':    return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
-      case 'sales':     return <SalesPage profile={profile} sales={sales} blocks={blocks} onChange={() => loadData(profile)} toast={showToast} />
-      case 'releases':  return <ReleasesPage profile={profile} blocks={blocks} clients={clients} releases={releases} onChange={() => loadData(profile)} toast={showToast} />
-      case 'quarries':  return <QuarriesPage profile={profile} quarries={quarries} blocks={blocks} onChange={() => loadData(profile)} toast={showToast} />
-      case 'team':      return <TeamPage profile={profile} team={team} onChange={() => loadData(profile)} toast={showToast} />
-      case 'clients':   return <ClientsPage profile={profile} clients={clients} onChange={() => loadData(profile)} toast={showToast} />
-      case 'payments':  return <PaymentsPage profile={profile} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
-      case 'catalog':   return <CatalogPage profile={profile} catalog={catalog} toast={showToast} />
+      case 'dashboard':   return <Dashboard blocks={blocks} quarries={quarries} clients={clients} sales={sales} />
+      case 'blocks':      return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
+      case 'sales':       return <SalesPage profile={profile} sales={sales} blocks={blocks} onChange={() => loadData(profile)} toast={showToast} />
+      case 'orders':      return <OrdersPage profile={profile} orders={orders} onChange={() => loadData(profile)} toast={showToast} />
+      case 'releases':    return <ReleasesPage profile={profile} blocks={blocks} clients={clients} releases={releases} onChange={() => loadData(profile)} toast={showToast} />
+      case 'commissions': return <CommissionsPage profile={profile} sales={sales} team={team} toast={showToast} />
+      case 'quarries':    return <QuarriesPage profile={profile} quarries={quarries} blocks={blocks} onChange={() => loadData(profile)} toast={showToast} />
+      case 'team':        return <TeamPage profile={profile} team={team} onChange={() => loadData(profile)} toast={showToast} />
+      case 'clients':     return <ClientsPage profile={profile} clients={clients} onChange={() => loadData(profile)} toast={showToast} />
+      case 'payments':    return <PaymentsPage profile={profile} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
+      case 'catalog':     return <CatalogPage profile={profile} catalog={catalog} favorites={favorites} onChange={() => loadData(profile)} toast={showToast} />
       default:
-        if (profile.role === 'client') return <CatalogPage profile={profile} catalog={catalog} toast={showToast} />
+        if (profile.role === 'client') return <CatalogPage profile={profile} catalog={catalog} favorites={favorites} onChange={() => loadData(profile)} toast={showToast} />
         if (profile.role === 'foreman') return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
-        return <Dashboard blocks={blocks} quarries={quarries} clients={clients} />
+        return <Dashboard blocks={blocks} quarries={quarries} clients={clients} sales={sales} />
     }
   }
 
@@ -2046,6 +2946,26 @@ export default function App() {
             <div className="tblogo">Stone <span>Block</span></div>
           </div>
           <div className="tbr">
+            <div style={{ position: 'relative' }}>
+              <button className="tbbtn" onClick={() => setNotifOpen(v => !v)} title="Notificações">
+                <Icon n="check" s={18} c="#fff" />
+                {notifications.filter(n => !n.read).length > 0 && (
+                  <span style={{ position: 'absolute', top: -4, right: -4, background: 'var(--err)', color: '#fff', borderRadius: 10, fontSize: 10, fontWeight: 700, padding: '2px 6px', minWidth: 18, textAlign: 'center' }}>
+                    {notifications.filter(n => !n.read).length}
+                  </span>
+                )}
+              </button>
+              {notifOpen && (
+                <>
+                  <div onClick={() => setNotifOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 65 }} />
+                  <NotificationsPanel
+                    profile={profile}
+                    notifications={notifications}
+                    onChange={() => loadData(profile)}
+                    onClose={() => setNotifOpen(false)} />
+                </>
+              )}
+            </div>
             <div className="av" title={profile.name}>{profile.avatar || profile.name.substring(0, 2).toUpperCase()}</div>
           </div>
         </div>
