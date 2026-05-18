@@ -273,7 +273,7 @@ function Dashboard({ blocks, quarries, clients, sales }) {
   const totalBRL = filteredBlocks.filter(b => b.currency === 'BRL' && b.status !== 'sold').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
   const totalUSD = filteredBlocks.filter(b => b.currency === 'USD' && b.status !== 'sold').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
 
-  // Filtered sales
+  // Filtered sales — também aplica filtro de pedreira (verifica se algum bloco vendido é da pedreira)
   const filteredSales = (sales || []).filter(s => {
     if (filterPeriod !== 'all' && filterPeriod !== 'custom') {
       const d = new Date(s.created_at)
@@ -291,6 +291,11 @@ function Dashboard({ blocks, quarries, clients, sales }) {
       const d = new Date(s.created_at)
       if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
       if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+    }
+    // Filtro de pedreira: pelo menos um bloco da venda deve ser da pedreira selecionada
+    if (filterQuarry) {
+      const hasFromQuarry = (s.blocks || []).some(b => b.quarry_id === filterQuarry)
+      if (!hasFromQuarry) return false
     }
     return true
   })
@@ -1614,11 +1619,12 @@ function SaleModal({ profile, selectedBlocks, clients, payments, onClose, onSucc
 // ═══════════════════════════════════════════════════════════════
 // SALES HISTORY PAGE
 // ═══════════════════════════════════════════════════════════════
-function SalesPage({ profile, sales, blocks, onChange, toast }) {
+function SalesPage({ profile, sales, blocks, quarries, onChange, toast }) {
   const [dtInicio, setDtInicio] = useState('')
   const [dtFim, setDtFim] = useState('')
   const [filterClient, setFilterClient] = useState('')
   const [detailSale, setDetailSale] = useState(null)
+  const [detailBlock, setDetailBlock] = useState(null)
 
   const today = new Date().toISOString().slice(0, 10)
 
@@ -1780,13 +1786,20 @@ function SalesPage({ profile, sales, blocks, onChange, toast }) {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {(detailSale.blocks || []).map(b => (
-                    <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 10, background: 'var(--haze)', borderRadius: 8 }}>
-                      {b.photos && b.photos[0] && (
-                        <img src={b.photos[0]} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 6 }} />
+                    <div key={b.id} onClick={() => setDetailBlock(b)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 10, background: 'var(--haze)', borderRadius: 8, cursor: 'pointer', transition: 'background .15s' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--sap1)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'var(--haze)'}>
+                      {b.photos && b.photos[0] ? (
+                        <img src={b.photos[0]} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6 }} />
+                      ) : (
+                        <div style={{ width: 60, height: 60, background: '#fff', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon n="cube" s={24} c="var(--mist)" />
+                        </div>
                       )}
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 700, color: 'var(--sap7)' }}>{b.code}</div>
                         <div style={{ fontSize: 12, color: 'var(--mist)' }}>{b.material} · Classif. {b.classification} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                        <div style={{ fontSize: 11, color: 'var(--sap6)', marginTop: 2 }}>👁 Clique para ver detalhes</div>
                       </div>
                       <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, color: 'var(--sap7)' }}>
                         {money(b.total_value, b.currency)}
@@ -1821,6 +1834,15 @@ function SalesPage({ profile, sales, blocks, onChange, toast }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Block detail modal (from inside sale detail) */}
+      {detailBlock && (
+        <BlockDetailModal
+          block={detailBlock}
+          quarry={(quarries || []).find(q => q.id === detailBlock.quarry_id)}
+          onClose={() => setDetailBlock(null)}
+        />
       )}
     </div>
   )
@@ -2920,7 +2942,7 @@ export default function App() {
     switch (page) {
       case 'dashboard':   return <Dashboard blocks={blocks} quarries={quarries} clients={clients} sales={sales} />
       case 'blocks':      return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
-      case 'sales':       return <SalesPage profile={profile} sales={sales} blocks={blocks} onChange={() => loadData(profile)} toast={showToast} />
+      case 'sales':       return <SalesPage profile={profile} sales={sales} blocks={blocks} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
       case 'orders':      return <OrdersPage profile={profile} orders={orders} onChange={() => loadData(profile)} toast={showToast} />
       case 'releases':    return <ReleasesPage profile={profile} blocks={blocks} clients={clients} releases={releases} onChange={() => loadData(profile)} toast={showToast} />
       case 'commissions': return <CommissionsPage profile={profile} sales={sales} team={team} toast={showToast} />

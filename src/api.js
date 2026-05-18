@@ -156,17 +156,28 @@ export async function createClient(profile, payload, accountData) {
     })
     userId = user?.id
 
-    // Atualiza o profile criado pelo trigger com role correto e company_id
     if (userId) {
-      // Aguarda um pouco para o trigger criar o profile
-      await new Promise(r => setTimeout(r, 500))
-      await supabase.from('profiles').update({
+      // Aguarda trigger criar profile (com retry)
+      let profileExists = false
+      for (let i = 0; i < 6; i++) {
+        await new Promise(r => setTimeout(r, 500))
+        const { data: p } = await supabase.from('profiles').select('id').eq('id', userId).maybeSingle()
+        if (p) { profileExists = true; break }
+      }
+
+      const profileData = {
         role: 'client',
         company_id: companyId,
         name: payload.name,
         phone: payload.phone || null,
         avatar: payload.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
-      }).eq('id', userId)
+      }
+
+      if (profileExists) {
+        await supabase.from('profiles').update(profileData).eq('id', userId)
+      } else {
+        await supabase.from('profiles').insert({ id: userId, ...profileData })
+      }
     }
   }
 
@@ -237,20 +248,40 @@ export async function deletePaymentMethod(id) {
 export async function listBlocks(profile) {
   const { data, error } = await supabase
     .from('blocks')
-    .select(`
-      *,
-      reserved_client:clients!reserved_for(id, name)
-    `)
+    .select('*')
     .eq('company_id', getCompanyId(profile))
     .order('created_at', { ascending: false })
   if (error) throw error
-  // Normalize photos: ensure it's always an array
-  return (data || []).map(b => ({
+
+  // Normalize photos array
+  const blocks = (data || []).map(b => ({
     ...b,
     photos: Array.isArray(b.photos) ? b.photos
           : typeof b.photos === 'string' ? (b.photos.startsWith('[') ? JSON.parse(b.photos) : [b.photos])
           : []
   }))
+
+  // Hidrata reserved_client com nome do cliente para blocos reservados
+  const reservedIds = [...new Set(blocks.filter(b => b.reserved_for).map(b => b.reserved_for))]
+  if (reservedIds.length > 0) {
+    try {
+      const { data: clientsData } = await supabase
+        .from('clients')
+        .select('id, name')
+        .in('id', reservedIds)
+      const map = {}
+      ;(clientsData || []).forEach(c => { map[c.id] = c })
+      blocks.forEach(b => {
+        if (b.reserved_for && map[b.reserved_for]) {
+          b.reserved_client = map[b.reserved_for]
+        }
+      })
+    } catch (e) {
+      console.warn('Could not load reserved clients:', e)
+    }
+  }
+
+  return blocks
 }
 
 export async function createBlock(profile, payload) {
@@ -273,9 +304,11 @@ export async function createBlock(profile, payload) {
 }
 
 export async function updateBlock(id, payload) {
+  // Remove campos que são relações (não são colunas)
+  const { reserved_client, ...cleanPayload } = payload
   const { data, error } = await supabase
     .from('blocks')
-    .update(payload)
+    .update(cleanPayload)
     .eq('id', id)
     .select()
     .single()
@@ -323,16 +356,26 @@ export async function addClientUser(profile, clientId, email, password, userName
   if (!user?.id) throw new Error('Falha ao criar usuário')
 
   // Aguarda trigger criar profile
-  await new Promise(r => setTimeout(r, 500))
+  let profileExists = false
+  for (let i = 0; i < 6; i++) {
+    await new Promise(r => setTimeout(r, 500))
+    const { data: p } = await supabase.from('profiles').select('id').eq('id', user.id).maybeSingle()
+    if (p) { profileExists = true; break }
+  }
 
-  // Atualiza profile com role e company_id corretos
   const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
-  await supabase.from('profiles').update({
+  const profileData = {
     role: 'client',
     company_id: companyId,
     name: userName,
     avatar: userName.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
-  }).eq('id', user.id)
+  }
+
+  if (profileExists) {
+    await supabase.from('profiles').update(profileData).eq('id', user.id)
+  } else {
+    await supabase.from('profiles').insert({ id: user.id, ...profileData })
+  }
 
   // Cria registro client_users
   const { error } = await supabase.from('client_users').insert({
@@ -361,7 +404,7 @@ export async function listSales(profile) {
       seller:profiles!seller_id(id, name, avatar),
       client:clients!client_id(id, name, country),
       payment_method:payment_methods!payment_method_id(id, name),
-      sale_blocks(block_id, block:blocks(id, code, material, net_volume, total_value, currency, photos, classification))
+      sale_blocks(block_id, block:blocks(id, code, material, net_volume, total_value, currency, photos, classification, quarry_id, prod_date, gross_volume, gross_l, gross_h, gross_w, net_l, net_h, net_w, price_m3, notes, sys_code, status))
     `)
     .eq('company_id', companyId)
     .order('created_at', { ascending: false })
@@ -376,7 +419,12 @@ export async function listSales(profile) {
   return (data || []).map(s => ({
     ...s,
     block_ids: (s.sale_blocks || []).map(sb => sb.block_id),
-    blocks: (s.sale_blocks || []).map(sb => sb.block).filter(Boolean),
+    blocks: (s.sale_blocks || []).map(sb => sb.block).filter(Boolean).map(b => ({
+      ...b,
+      photos: Array.isArray(b.photos) ? b.photos
+            : typeof b.photos === 'string' ? (b.photos.startsWith('[') ? JSON.parse(b.photos) : [b.photos])
+            : []
+    })),
   }))
 }
 
@@ -451,18 +499,40 @@ export async function createTeamMember(profile, email, password, payload) {
   })
 
   if (user?.id) {
-    // Aguarda o trigger criar o profile
-    await new Promise(r => setTimeout(r, 500))
-    const { error } = await supabase.from('profiles').update({
-      role: payload.role,
-      company_id: companyId,
-      name: payload.name,
-      phone: payload.phone || null,
-      commission: payload.commission || false,
-      commission_pct: payload.commission ? parseFloat(payload.commission_pct) || 0 : 0,
-      avatar: payload.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
-    }).eq('id', user.id)
-    if (error) throw error
+    // Aguarda o trigger criar o profile (até 3 tentativas)
+    let profileExists = false
+    for (let i = 0; i < 6; i++) {
+      await new Promise(r => setTimeout(r, 500))
+      const { data: p } = await supabase.from('profiles').select('id').eq('id', user.id).maybeSingle()
+      if (p) { profileExists = true; break }
+    }
+
+    if (!profileExists) {
+      // Tenta criar manualmente
+      console.warn('Profile não criado pelo trigger, criando manualmente...')
+      await supabase.from('profiles').insert({
+        id: user.id,
+        role: payload.role,
+        company_id: companyId,
+        name: payload.name,
+        phone: payload.phone || null,
+        commission: payload.commission || false,
+        commission_pct: payload.commission ? parseFloat(payload.commission_pct) || 0 : 0,
+        avatar: payload.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
+      })
+    } else {
+      // Atualiza profile criado pelo trigger
+      const { error } = await supabase.from('profiles').update({
+        role: payload.role,
+        company_id: companyId,
+        name: payload.name,
+        phone: payload.phone || null,
+        commission: payload.commission || false,
+        commission_pct: payload.commission ? parseFloat(payload.commission_pct) || 0 : 0,
+        avatar: payload.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
+      }).eq('id', user.id)
+      if (error) throw error
+    }
   }
 
   return user
