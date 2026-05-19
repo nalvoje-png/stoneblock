@@ -734,43 +734,60 @@ export async function listOrders(profile) {
 }
 
 export async function createClientOrder(profile, blockId, message) {
-  // Cliente confirma a compra — vira uma venda direta
+  // Wrapper: chama a função multi com um único bloco
+  return createClientPurchaseMulti(profile, [blockId], message)
+}
+
+// Compra de múltiplos blocos em uma única venda
+export async function createClientPurchaseMulti(profile, blockIds, message) {
   const clientRec = await getClientByUser(profile.id)
   if (!clientRec) throw new Error('Você não está vinculado a um cliente.')
+  if (!blockIds || blockIds.length === 0) throw new Error('Selecione pelo menos um bloco.')
 
-  // 1. Busca dados do bloco para o valor
-  const { data: block, error: blockErr } = await supabase
+  // 1. Busca dados de todos os blocos
+  const { data: blocks, error: blockErr } = await supabase
     .from('blocks')
     .select('*')
-    .eq('id', blockId)
-    .single()
+    .in('id', blockIds)
   if (blockErr) throw blockErr
-  if (block.status === 'sold') throw new Error('Esse bloco já foi vendido.')
+  if (!blocks || blocks.length === 0) throw new Error('Blocos não encontrados.')
 
-  // 2. Cria a venda (sem vendedor — venda direta do cliente)
+  const soldOnes = blocks.filter(b => b.status === 'sold')
+  if (soldOnes.length > 0) {
+    throw new Error(`Os blocos ${soldOnes.map(b => b.code).join(', ')} já foram vendidos.`)
+  }
+
+  // Calcula totais por moeda
+  const totalBRL = blocks.filter(b => b.currency === 'BRL').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+  const totalUSD = blocks.filter(b => b.currency === 'USD').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+
+  const codes = blocks.map(b => b.code).join(', ')
+
+  // 2. Cria a venda (sem vendedor — compra direta do cliente)
   const { data: sale, error: saleError } = await supabase
     .from('sales')
     .insert({
       company_id: clientRec.company_id,
-      seller_id: null,                            // venda direta sem vendedor
+      seller_id: null,
       client_id: clientRec.id,
       payment_method_id: null,
       dollar_rate: null,
-      total_brl: block.currency === 'BRL' ? block.total_value : 0,
-      total_usd: block.currency === 'USD' ? block.total_value : 0,
+      total_brl: totalBRL,
+      total_usd: totalUSD,
       obs: message ? `Compra direta pelo catálogo. ${message}` : 'Compra direta pelo catálogo.',
     })
     .select()
     .single()
   if (saleError) throw saleError
 
-  // 3. Vincula bloco
-  await supabase.from('sale_blocks').insert({ sale_id: sale.id, block_id: blockId })
+  // 3. Vincula todos os blocos à venda
+  const saleBlocks = blockIds.map(bid => ({ sale_id: sale.id, block_id: bid }))
+  await supabase.from('sale_blocks').insert(saleBlocks)
 
-  // 4. Marca bloco como vendido
-  await supabase.from('blocks').update({ status: 'sold', reserved_for: null }).eq('id', blockId)
+  // 4. Marca todos os blocos como vendidos
+  await supabase.from('blocks').update({ status: 'sold', reserved_for: null }).in('id', blockIds)
 
-  // 5. Notifica o dono e vendedores da empresa
+  // 5. Notifica o dono e vendedores
   try {
     const { data: ownersAndSellers } = await supabase
       .from('profiles')
@@ -779,10 +796,13 @@ export async function createClientOrder(profile, blockId, message) {
       .in('role', ['owner', 'seller'])
 
     if (ownersAndSellers && ownersAndSellers.length > 0) {
+      const blocksText = blocks.length === 1
+        ? `o bloco ${codes}`
+        : `${blocks.length} blocos: ${codes}`
       const notifs = ownersAndSellers.map(p => ({
         user_id: p.id,
         company_id: clientRec.company_id,
-        message: `🛒 ${clientRec.name} comprou o bloco ${block.code} (${block.material})`,
+        message: `🛒 ${clientRec.name} comprou ${blocksText}`,
         type: 'purchase',
         read: false,
       }))

@@ -2313,13 +2313,39 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
   const [showConfirm, setShowConfirm] = useState(false)
   const [buyMessage, setBuyMessage] = useState('')
   const [filterFavOnly, setFilterFavOnly] = useState(false)
+  const [filterMaterial, setFilterMaterial] = useState('')
+  const [filterQuarry, setFilterQuarry] = useState('')
   const [saving, setSaving] = useState(false)
   const [photoIdx, setPhotoIdx] = useState(0)
+  const [selectedIds, setSelectedIds] = useState([])
+  const [multiBuy, setMultiBuy] = useState(false)
+  const [multiBuyMessage, setMultiBuyMessage] = useState('')
 
   const STATUS_LBL = { available: 'Disponível', reserved: 'Reservado' }
   const STATUS_CLR = { available: '#10b981', reserved: '#f59e0b' }
 
-  const filteredCatalog = filterFavOnly ? catalog.filter(b => favorites.includes(b.id)) : catalog
+  // Unique materials e quarries do catálogo
+  const catalogMaterials = [...new Set(catalog.map(b => b.material).filter(Boolean))].sort()
+  const catalogQuarries = (() => {
+    const map = {}
+    catalog.forEach(b => {
+      const id = b.quarry_id
+      const name = b.quarry?.name || (quarries || []).find(q => q.id === id)?.name
+      if (id && name) map[id] = name
+    })
+    return Object.entries(map).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  })()
+
+  const filteredCatalog = catalog.filter(b => {
+    if (filterFavOnly && !favorites.includes(b.id)) return false
+    if (filterMaterial && b.material !== filterMaterial) return false
+    if (filterQuarry && b.quarry_id !== filterQuarry) return false
+    return true
+  })
+
+  const selectedBlocks = catalog.filter(b => selectedIds.includes(b.id))
+  const totalSelectedBRL = selectedBlocks.filter(b => b.currency === 'BRL').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+  const totalSelectedUSD = selectedBlocks.filter(b => b.currency === 'USD').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
 
   const handleFavorite = async (blockId) => {
     try {
@@ -2327,6 +2353,11 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
       await onChange()
     } catch (e) { toast('Erro: ' + e.message, 'err') }
   }
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+  const clearSelection = () => setSelectedIds([])
 
   const openDetail = (b) => {
     setSelected(b)
@@ -2354,6 +2385,23 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
     } finally { setSaving(false) }
   }
 
+  const confirmMultiBuy = async () => {
+    if (selectedIds.length === 0) return
+    setSaving(true)
+    try {
+      await api.createClientPurchaseMulti(profile, selectedIds, multiBuyMessage.trim() || null)
+      toast(`🎉 ${selectedIds.length} bloco(s) comprado(s) com sucesso!`, 'ok')
+      clearSelection()
+      setMultiBuy(false)
+      setMultiBuyMessage('')
+      await onChange()
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setSaving(false) }
+  }
+
+  const hasFilter = filterFavOnly || filterMaterial || filterQuarry
+
   return (
     <div>
       <div className="ph">
@@ -2361,29 +2409,76 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
           <div>
             <div className="ptit">Catálogo</div>
             <div className="psub">
-              {filterFavOnly ? `${filteredCatalog.length} favorito(s)` : `${catalog.length} bloco(s) disponível(is)`}
+              {hasFilter ? `${filteredCatalog.length} de ${catalog.length} bloco(s)` : `${catalog.length} bloco(s) disponível(is)`}
             </div>
           </div>
-          <button className={'btn ' + (filterFavOnly ? 'bb' : 'bo')} onClick={() => setFilterFavOnly(!filterFavOnly)}>
-            ⭐ {filterFavOnly ? 'Ver todos' : `Favoritos (${favorites.length})`}
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {selectedIds.length > 0 && (
+              <>
+                <button className="btn bg" onClick={() => setMultiBuy(true)}>
+                  <Icon n="cart" s={16} c="#fff" /> Comprar {selectedIds.length} bloco(s)
+                </button>
+                <button className="btn bo" onClick={clearSelection}>
+                  <Icon n="x" s={14} /> Limpar
+                </button>
+              </>
+            )}
+            <button className={'btn ' + (filterFavOnly ? 'bb' : 'bo')} onClick={() => setFilterFavOnly(!filterFavOnly)}>
+              ⭐ {filterFavOnly ? 'Ver todos' : `Favoritos (${favorites.length})`}
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Filtros */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+          <option value="">Todos os materiais</option>
+          {catalogMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+          <option value="">Todas as pedreiras</option>
+          {catalogQuarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+        </select>
+        {(filterMaterial || filterQuarry) && (
+          <button className="btn bo bsm" onClick={() => { setFilterMaterial(''); setFilterQuarry('') }}>
+            <Icon n="x" s={13} /> Limpar filtros
+          </button>
+        )}
+      </div>
+
+      {/* Resumo da seleção */}
+      {selectedIds.length > 0 && (
+        <div style={{ background: 'var(--sap1)', border: '1px solid var(--sap2)', padding: '12px 16px', borderRadius: 10, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ fontSize: 14 }}>
+            <strong style={{ color: 'var(--sap7)' }}>{selectedIds.length} bloco(s) selecionado(s)</strong>
+            <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 2 }}>
+              {totalSelectedBRL > 0 && <span>{money(totalSelectedBRL, 'BRL')}</span>}
+              {totalSelectedBRL > 0 && totalSelectedUSD > 0 && <span> · </span>}
+              {totalSelectedUSD > 0 && <span>{money(totalSelectedUSD, 'USD')}</span>}
+            </div>
+          </div>
+        </div>
+      )}
 
       {filteredCatalog.length === 0 ? (
         <div className="es">
           <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
-          <div className="estit">{filterFavOnly ? 'Nenhum favorito ainda' : 'Nenhum bloco disponível'}</div>
+          <div className="estit">{hasFilter ? 'Nenhum bloco encontrado com esses filtros' : 'Nenhum bloco disponível'}</div>
           <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>
-            {filterFavOnly ? 'Marque blocos como ⭐ para vê-los aqui.' : 'Quando blocos forem liberados, aparecerão aqui.'}
+            {!hasFilter && 'Quando blocos forem liberados, aparecerão aqui.'}
           </div>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 14 }}>
           {filteredCatalog.map(b => {
             const isFav = favorites.includes(b.id)
+            const isSel = selectedIds.includes(b.id)
             return (
-              <div key={b.id} className="card" style={{ cursor: 'pointer', position: 'relative' }} onClick={() => openDetail(b)}>
+              <div key={b.id} className="card" style={{ cursor: 'pointer', position: 'relative', ...(isSel && { boxShadow: '0 0 0 3px var(--sap5)', borderColor: 'var(--sap5)' }) }} onClick={() => openDetail(b)}>
+                <div onClick={(e) => { e.stopPropagation(); toggleSelect(b.id) }} title="Selecionar para compra múltipla" style={{ position: 'absolute', top: 8, left: 8, zIndex: 2, width: 32, height: 32, background: isSel ? 'var(--sap6)' : 'rgba(255,255,255,.95)', border: '2px solid ' + (isSel ? 'var(--sap6)' : 'var(--fog)'), borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                  {isSel && <Icon n="check" s={16} c="#fff" />}
+                </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleFavorite(b.id) }}
                   style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, width: 36, height: 36, background: isFav ? '#fef3c7' : 'rgba(255,255,255,.9)', border: '1px solid ' + (isFav ? '#fde68a' : 'var(--fog)'), borderRadius: 8, cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -2412,7 +2507,82 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
         </div>
       )}
 
-      {/* Modal de Detalhes Completos + Comprar */}
+      {/* Modal compra múltipla */}
+      {multiBuy && (
+        <div className="mo" onClick={() => { setMultiBuy(false); setMultiBuyMessage('') }}>
+          <div className="md" style={{ maxWidth: 600 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div className="mtit">🛒 Confirmar Compra Múltipla</div>
+              <button className="btn bo bsm" onClick={() => { setMultiBuy(false); setMultiBuyMessage('') }}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              <div style={{ marginBottom: 16, padding: 14, background: 'var(--haze)', borderRadius: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 10 }}>
+                  Você vai comprar {selectedIds.length} bloco(s):
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 280, overflowY: 'auto' }}>
+                  {selectedBlocks.map(b => (
+                    <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: '#fff', borderRadius: 6 }}>
+                      {b.photos && b.photos[0] ? (
+                        <img src={b.photos[0]} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 5, flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 44, height: 44, background: 'var(--haze)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Icon n="cube" s={20} c="var(--mist)" />
+                        </div>
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--sap7)' }}>{b.code}</div>
+                        <div style={{ fontSize: 11, color: 'var(--mist)' }}>{b.material} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                      </div>
+                      <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 13, color: 'var(--sap7)' }}>
+                        {money(b.total_value, b.currency)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--sap1)', padding: 16, borderRadius: 10, marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: 'var(--sap7)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Valor Total</div>
+                {totalSelectedBRL > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: totalSelectedUSD > 0 ? 4 : 0 }}>
+                    <span style={{ fontSize: 13, color: 'var(--mist)' }}>Em Reais:</span>
+                    <span style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 22, color: 'var(--sap7)' }}>{money(totalSelectedBRL, 'BRL')}</span>
+                  </div>
+                )}
+                {totalSelectedUSD > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13, color: 'var(--mist)' }}>Em Dólar:</span>
+                    <span style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 22, color: 'var(--sap7)' }}>{money(totalSelectedUSD, 'USD')}</span>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: 12, borderRadius: 8, marginBottom: 14, fontSize: 13, color: '#92400e', lineHeight: 1.6 }}>
+                ⚠️ Ao confirmar, todos os blocos serão marcados como vendidos para você. O vendedor entrará em contato para finalizar.
+              </div>
+
+              <div className="fg">
+                <label className="fl">Mensagem para o vendedor (opcional)</label>
+                <textarea
+                  className="fc"
+                  value={multiBuyMessage}
+                  onChange={e => setMultiBuyMessage(e.target.value)}
+                  placeholder="Ex: forma de pagamento, prazo, etc."
+                  style={{ minHeight: 70 }} />
+              </div>
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={() => { setMultiBuy(false); setMultiBuyMessage('') }}>Cancelar</button>
+              <button className="btn bg" onClick={confirmMultiBuy} disabled={saving}>
+                {saving ? <><span className="spinner"></span> Processando</> : <><Icon n="check" s={14} c="#fff" /> Confirmar Compra</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Detalhes + Compra individual */}
       {selected && (() => {
         const photos = (selected.photos || []).filter(Boolean)
         const quarry = selected.quarry || (quarries || []).find(q => q.id === selected.quarry_id)
@@ -2427,7 +2597,6 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
                 <button className="btn bo bsm" onClick={closeDetail}><Icon n="x" s={14} /></button>
               </div>
               <div className="mbody">
-                {/* Carrossel de fotos */}
                 {photos.length > 0 ? (
                   <div style={{ marginBottom: 16 }}>
                     <img src={photos[photoIdx]} alt="" style={{ width: '100%', maxHeight: 360, objectFit: 'contain', background: 'var(--haze)', borderRadius: 8 }} />
@@ -2445,7 +2614,6 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
                   </div>
                 )}
 
-                {/* Status */}
                 <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                   <span className="bdg" style={{ background: STATUS_CLR[selected.status] + '20', color: STATUS_CLR[selected.status], padding: '6px 12px', fontSize: 13 }}>
                     {STATUS_LBL[selected.status]}
@@ -2455,7 +2623,6 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
                   </span>
                 </div>
 
-                {/* Info geral */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 10, marginBottom: 14 }}>
                   <div className="sc" style={{ padding: 12 }}>
                     <div className="slbl2">Pedreira</div>
@@ -2476,7 +2643,6 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
                   </div>
                 </div>
 
-                {/* Medidas */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
                   <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 6 }}>Medidas Brutas</div>
@@ -2492,7 +2658,6 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
                   </div>
                 </div>
 
-                {/* Valor Total */}
                 <div style={{ background: 'var(--sap1)', padding: 18, borderRadius: 10, textAlign: 'center', marginBottom: 14 }}>
                   <div style={{ fontSize: 11, color: 'var(--sap7)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Valor Total</div>
                   <div style={{ fontFamily: 'Sora,sans-serif', fontSize: 30, fontWeight: 800, color: 'var(--sap7)' }}>{money(selected.total_value, selected.currency)}</div>
@@ -2505,7 +2670,6 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
                   </div>
                 )}
 
-                {/* Botão Comprar OU Confirmação */}
                 {!showConfirm ? (
                   <button className="btn bg" onClick={() => setShowConfirm(true)} style={{ width: '100%', padding: '14px 18px', fontSize: 15 }}>
                     <Icon n="cart" s={18} c="#fff" /> Comprar este Bloco
