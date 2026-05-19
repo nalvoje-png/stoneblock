@@ -1130,7 +1130,7 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
           {filteredBlocks.map(b => {
             const q = quarries.find(x => x.id === b.quarry_id)
             const isSelected = selectedIds.includes(b.id)
-            const isSelectable = b.status === 'available' && canSell
+            const isSelectable = (b.status === 'available' || b.status === 'reserved') && canSell
             return (
               <div key={b.id} className="card" style={{ position: 'relative', ...(isSelected && { boxShadow: '0 0 0 3px var(--sap5)', borderColor: 'var(--sap5)' }) }}>
                 {isSelectable && (
@@ -1455,7 +1455,13 @@ function BlockDetailModal({ block, quarry, onClose }) {
 
 
 function SaleModal({ profile, selectedBlocks, clients, payments, onClose, onSuccess, toast }) {
-  const [clientId, setClientId] = useState('')
+  // Detecta cliente reservado dos blocos selecionados
+  const reservedClientId = (() => {
+    const reserved = selectedBlocks.find(b => b.reserved_for)
+    return reserved?.reserved_for || ''
+  })()
+
+  const [clientId, setClientId] = useState(reservedClientId)
   const [paymentId, setPaymentId] = useState('')
   const [dollarRate, setDollarRate] = useState('')
   const [obs, setObs] = useState('')
@@ -1549,10 +1555,15 @@ function SaleModal({ profile, selectedBlocks, clients, payments, onClose, onSucc
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="fg">
               <label className="fl">Cliente *</label>
-              <select className="fc" value={clientId} onChange={e => setClientId(e.target.value)}>
+              <select className="fc" value={clientId} onChange={e => setClientId(e.target.value)} style={reservedClientId ? { borderColor: '#fbbf24', background: '#fffbeb' } : {}}>
                 <option value="">Selecione...</option>
                 {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
+              {reservedClientId && clientId === reservedClientId && (
+                <div style={{ fontSize: 11, color: '#92400e', marginTop: 4 }}>
+                  🔒 Cliente pré-selecionado pela reserva do bloco
+                </div>
+              )}
             </div>
             <div className="fg">
               <label className="fl">Forma de Pagamento</label>
@@ -2188,14 +2199,28 @@ function ReleasesPage({ profile, blocks, clients, releases, onChange, toast }) {
                   {availableBlocks.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: 30, color: 'var(--mist)' }}>Nenhum bloco disponível</div>
                   ) : (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: 10, maxHeight: 400, overflowY: 'auto' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 10, maxHeight: 460, overflowY: 'auto' }}>
                       {availableBlocks.map(b => {
                         const sel = selectedBlocks.includes(b.id)
+                        const photo = b.photos && b.photos[0]
                         return (
-                          <div key={b.id} onClick={() => toggleBlock(b.id)} style={{ border: '2px solid ' + (sel ? 'var(--sap6)' : 'var(--fog)'), background: sel ? 'var(--sap1)' : '#fff', borderRadius: 8, padding: 10, cursor: 'pointer' }}>
-                            <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--sap7)' }}>{b.code}</div>
-                            <div style={{ fontSize: 11, color: 'var(--mist)' }}>{b.material}</div>
-                            <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4 }}>{money(b.total_value, b.currency)}</div>
+                          <div key={b.id} onClick={() => toggleBlock(b.id)} style={{ border: '2px solid ' + (sel ? 'var(--sap6)' : 'var(--fog)'), background: sel ? 'var(--sap1)' : '#fff', borderRadius: 8, overflow: 'hidden', cursor: 'pointer', display: 'flex', flexDirection: 'column' }}>
+                            {photo ? (
+                              <img src={photo} alt={b.code} style={{ width: '100%', height: 90, objectFit: 'cover', background: 'var(--haze)' }} />
+                            ) : (
+                              <div style={{ width: '100%', height: 90, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <Icon n="cube" s={28} c="var(--mist)" />
+                              </div>
+                            )}
+                            <div style={{ padding: 10 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--sap7)' }}>{b.code}</div>
+                                {sel && <Icon n="check" s={14} c="var(--sap6)" />}
+                              </div>
+                              <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 4 }}>{b.material}</div>
+                              <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 4 }}>Vol. {(b.net_volume || 0).toFixed(2)} m³</div>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink)' }}>{money(b.total_value, b.currency)}</div>
+                            </div>
                           </div>
                         )
                       })}
@@ -2283,12 +2308,13 @@ function ReleasesPage({ profile, blocks, clients, releases, onChange, toast }) {
 // ═══════════════════════════════════════════════════════════════
 // CLIENT CATALOG — visão do cliente, vê blocos liberados para ele
 // ═══════════════════════════════════════════════════════════════
-function CatalogPage({ profile, catalog, favorites, onChange, toast }) {
+function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast }) {
   const [selected, setSelected] = useState(null)
-  const [showOrderForm, setShowOrderForm] = useState(false)
-  const [orderMessage, setOrderMessage] = useState('')
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [buyMessage, setBuyMessage] = useState('')
   const [filterFavOnly, setFilterFavOnly] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [photoIdx, setPhotoIdx] = useState(0)
 
   const STATUS_LBL = { available: 'Disponível', reserved: 'Reservado' }
   const STATUS_CLR = { available: '#10b981', reserved: '#f59e0b' }
@@ -2302,15 +2328,26 @@ function CatalogPage({ profile, catalog, favorites, onChange, toast }) {
     } catch (e) { toast('Erro: ' + e.message, 'err') }
   }
 
-  const sendOrder = async () => {
+  const openDetail = (b) => {
+    setSelected(b)
+    setPhotoIdx(0)
+    setShowConfirm(false)
+    setBuyMessage('')
+  }
+
+  const closeDetail = () => {
+    setSelected(null)
+    setShowConfirm(false)
+    setBuyMessage('')
+  }
+
+  const confirmPurchase = async () => {
     if (!selected) return
     setSaving(true)
     try {
-      await api.createClientOrder(profile, selected.id, orderMessage.trim() || null)
-      toast('Pedido enviado! O vendedor entrará em contato.', 'ok')
-      setShowOrderForm(false)
-      setSelected(null)
-      setOrderMessage('')
+      await api.createClientOrder(profile, selected.id, buyMessage.trim() || null)
+      toast('🎉 Compra realizada com sucesso!', 'ok')
+      closeDetail()
       await onChange()
     } catch (e) {
       toast('Erro: ' + e.message, 'err')
@@ -2346,7 +2383,7 @@ function CatalogPage({ profile, catalog, favorites, onChange, toast }) {
           {filteredCatalog.map(b => {
             const isFav = favorites.includes(b.id)
             return (
-              <div key={b.id} className="card" style={{ cursor: 'pointer', position: 'relative' }} onClick={() => setSelected(b)}>
+              <div key={b.id} className="card" style={{ cursor: 'pointer', position: 'relative' }} onClick={() => openDetail(b)}>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleFavorite(b.id) }}
                   style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, width: 36, height: 36, background: isFav ? '#fef3c7' : 'rgba(255,255,255,.9)', border: '1px solid ' + (isFav ? '#fde68a' : 'var(--fog)'), borderRadius: 8, cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -2375,84 +2412,140 @@ function CatalogPage({ profile, catalog, favorites, onChange, toast }) {
         </div>
       )}
 
-      {/* Detail modal */}
-      {selected && (
-        <div className="mo" onClick={() => { setSelected(null); setShowOrderForm(false) }}>
-          <div className="md" style={{ maxWidth: 700 }} onClick={e => e.stopPropagation()}>
-            <div className="mhead">
-              <div className="mtit">{selected.code} — {selected.material}</div>
-              <button className="btn bo bsm" onClick={() => { setSelected(null); setShowOrderForm(false) }}><Icon n="x" s={14} /></button>
-            </div>
-            <div className="mbody">
-              {selected.photos && selected.photos.length > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', gap: 8, marginBottom: 18 }}>
-                  {selected.photos.map((url, i) => (
-                    <img key={i} src={url} alt="" style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 8 }} />
-                  ))}
+      {/* Modal de Detalhes Completos + Comprar */}
+      {selected && (() => {
+        const photos = (selected.photos || []).filter(Boolean)
+        const quarry = selected.quarry || (quarries || []).find(q => q.id === selected.quarry_id)
+        return (
+          <div className="mo" onClick={closeDetail}>
+            <div className="md" style={{ maxWidth: 820 }} onClick={e => e.stopPropagation()}>
+              <div className="mhead">
+                <div>
+                  <div className="mtit">{selected.code}</div>
+                  <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>{selected.material}</div>
                 </div>
-              )}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 10, marginBottom: 14 }}>
-                <div className="sc" style={{ padding: 12 }}>
-                  <div className="slbl2">Volume Líquido</div>
-                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 18 }}>{(selected.net_volume || 0).toFixed(2)} m³</div>
-                </div>
-                <div className="sc" style={{ padding: 12, borderTopColor: 'var(--warn)' }}>
-                  <div className="slbl2">Classificação</div>
-                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 18 }}>{selected.classification}</div>
-                </div>
-                <div className="sc" style={{ padding: 12, borderTopColor: 'var(--ok)' }}>
-                  <div className="slbl2">Preço m³</div>
-                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{money(selected.price_m3, selected.currency)}</div>
-                </div>
+                <button className="btn bo bsm" onClick={closeDetail}><Icon n="x" s={14} /></button>
               </div>
-              <div style={{ background: 'var(--sap1)', padding: 18, borderRadius: 10, textAlign: 'center', marginBottom: 14 }}>
-                <div style={{ fontSize: 11, color: 'var(--sap7)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Valor Total</div>
-                <div style={{ fontFamily: 'Sora,sans-serif', fontSize: 30, fontWeight: 800, color: 'var(--sap7)' }}>{money(selected.total_value, selected.currency)}</div>
-              </div>
-              {selected.quarry && (
-                <div style={{ fontSize: 13, color: 'var(--mist)', textAlign: 'center', marginBottom: 14 }}>
-                  📍 {selected.quarry.name} {selected.quarry.location && ' · ' + selected.quarry.location}
-                </div>
-              )}
-              {selected.notes && (
-                <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8, fontSize: 13, marginBottom: 14 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 4 }}>Observações</div>
-                  {selected.notes}
-                </div>
-              )}
+              <div className="mbody">
+                {/* Carrossel de fotos */}
+                {photos.length > 0 ? (
+                  <div style={{ marginBottom: 16 }}>
+                    <img src={photos[photoIdx]} alt="" style={{ width: '100%', maxHeight: 360, objectFit: 'contain', background: 'var(--haze)', borderRadius: 8 }} />
+                    {photos.length > 1 && (
+                      <div style={{ display: 'flex', gap: 6, marginTop: 8, overflowX: 'auto' }}>
+                        {photos.map((url, i) => (
+                          <img key={i} src={url} alt="" onClick={() => setPhotoIdx(i)} style={{ width: 70, height: 70, objectFit: 'cover', borderRadius: 6, cursor: 'pointer', flexShrink: 0, border: '2px solid ' + (i === photoIdx ? 'var(--sap6)' : 'transparent') }} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ height: 200, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, marginBottom: 16 }}>
+                    <Icon n="cube" s={48} c="var(--mist)" />
+                  </div>
+                )}
 
-              {showOrderForm ? (
-                <div style={{ background: '#fefce8', border: '1px solid #fde68a', padding: 14, borderRadius: 10 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 10, color: '#854d0e' }}>Enviar pedido de interesse</div>
-                  <textarea
-                    className="fc"
-                    value={orderMessage}
-                    onChange={e => setOrderMessage(e.target.value)}
-                    placeholder="Mensagem opcional (ex: quero negociar o preço, preciso urgente, etc.)"
-                    style={{ minHeight: 80 }} />
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    <button className="btn bo" onClick={() => setShowOrderForm(false)}>Cancelar</button>
-                    <button className="btn bg" onClick={sendOrder} disabled={saving}>
-                      {saving ? <><span className="spinner"></span> Enviando</> : <><Icon n="check" s={14} c="#fff" /> Enviar Pedido</>}
-                    </button>
+                {/* Status */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+                  <span className="bdg" style={{ background: STATUS_CLR[selected.status] + '20', color: STATUS_CLR[selected.status], padding: '6px 12px', fontSize: 13 }}>
+                    {STATUS_LBL[selected.status]}
+                  </span>
+                  <span className="bdg" style={{ background: 'var(--sap1)', color: 'var(--sap7)', padding: '6px 12px', fontSize: 13 }}>
+                    Classificação {selected.classification}
+                  </span>
+                </div>
+
+                {/* Info geral */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 10, marginBottom: 14 }}>
+                  <div className="sc" style={{ padding: 12 }}>
+                    <div className="slbl2">Pedreira</div>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14 }}>{quarry?.name || '—'}</div>
+                    {quarry?.location && <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 2 }}>{quarry.location}</div>}
+                  </div>
+                  <div className="sc" style={{ padding: 12, borderTopColor: 'var(--ok)' }}>
+                    <div className="slbl2">Volume Líquido</div>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{(selected.net_volume || 0).toFixed(2)} m³</div>
+                  </div>
+                  <div className="sc" style={{ padding: 12, borderTopColor: 'var(--warn)' }}>
+                    <div className="slbl2">Volume Bruto</div>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{(selected.gross_volume || 0).toFixed(2)} m³</div>
+                  </div>
+                  <div className="sc" style={{ padding: 12, borderTopColor: 'var(--sap5)' }}>
+                    <div className="slbl2">Preço por m³</div>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14 }}>{money(selected.price_m3, selected.currency)}</div>
                   </div>
                 </div>
-              ) : (
-                <button className="btn bg" onClick={() => setShowOrderForm(true)} style={{ width: '100%' }}>
-                  <Icon n="cart" s={16} c="#fff" /> Tenho Interesse — Enviar Pedido
-                </button>
-              )}
+
+                {/* Medidas */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+                  <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 6 }}>Medidas Brutas</div>
+                    <div style={{ fontSize: 13 }}>Comprimento: {selected.gross_l || '—'} m</div>
+                    <div style={{ fontSize: 13 }}>Altura: {selected.gross_h || '—'} m</div>
+                    <div style={{ fontSize: 13 }}>Largura: {selected.gross_w || '—'} m</div>
+                  </div>
+                  <div style={{ background: '#dcfce7', padding: 12, borderRadius: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: '#15803d', marginBottom: 6 }}>Medidas Líquidas</div>
+                    <div style={{ fontSize: 13 }}>Comprimento: {selected.net_l || '—'} m</div>
+                    <div style={{ fontSize: 13 }}>Altura: {selected.net_h || '—'} m</div>
+                    <div style={{ fontSize: 13 }}>Largura: {selected.net_w || '—'} m</div>
+                  </div>
+                </div>
+
+                {/* Valor Total */}
+                <div style={{ background: 'var(--sap1)', padding: 18, borderRadius: 10, textAlign: 'center', marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, color: 'var(--sap7)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Valor Total</div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontSize: 30, fontWeight: 800, color: 'var(--sap7)' }}>{money(selected.total_value, selected.currency)}</div>
+                </div>
+
+                {selected.notes && (
+                  <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8, fontSize: 13, marginBottom: 14 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 4 }}>Observações</div>
+                    {selected.notes}
+                  </div>
+                )}
+
+                {/* Botão Comprar OU Confirmação */}
+                {!showConfirm ? (
+                  <button className="btn bg" onClick={() => setShowConfirm(true)} style={{ width: '100%', padding: '14px 18px', fontSize: 15 }}>
+                    <Icon n="cart" s={18} c="#fff" /> Comprar este Bloco
+                  </button>
+                ) : (
+                  <div style={{ background: '#fffbeb', border: '2px solid #fde68a', padding: 16, borderRadius: 10 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 10, color: '#854d0e', fontSize: 15 }}>
+                      ⚠️ Confirmar Compra
+                    </div>
+                    <div style={{ fontSize: 13, color: '#92400e', marginBottom: 12, lineHeight: 1.6 }}>
+                      Você está prestes a comprar o bloco <strong>{selected.code}</strong> ({selected.material}) por <strong>{money(selected.total_value, selected.currency)}</strong>.
+                      <br /><br />
+                      Ao confirmar, o bloco será reservado para você e o vendedor entrará em contato para finalizar.
+                    </div>
+                    <textarea
+                      className="fc"
+                      value={buyMessage}
+                      onChange={e => setBuyMessage(e.target.value)}
+                      placeholder="Mensagem adicional (opcional)"
+                      style={{ minHeight: 60, marginBottom: 12 }} />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn bo" onClick={() => { setShowConfirm(false); setBuyMessage('') }} style={{ flex: 1 }}>
+                        Cancelar
+                      </button>
+                      <button className="btn bg" onClick={confirmPurchase} disabled={saving} style={{ flex: 2 }}>
+                        {saving ? <><span className="spinner"></span> Processando</> : <><Icon n="check" s={14} c="#fff" /> Confirmar Compra</>}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ORDERS PAGE — pedidos de interesse dos clientes
-// ═══════════════════════════════════════════════════════════════
+
 function OrdersPage({ profile, orders, onChange, toast }) {
   const STATUS_LBL = {
     pending: 'Pendente',
@@ -2950,9 +3043,9 @@ export default function App() {
       case 'team':        return <TeamPage profile={profile} team={team} onChange={() => loadData(profile)} toast={showToast} />
       case 'clients':     return <ClientsPage profile={profile} clients={clients} onChange={() => loadData(profile)} toast={showToast} />
       case 'payments':    return <PaymentsPage profile={profile} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
-      case 'catalog':     return <CatalogPage profile={profile} catalog={catalog} favorites={favorites} onChange={() => loadData(profile)} toast={showToast} />
+      case 'catalog':     return <CatalogPage profile={profile} catalog={catalog} favorites={favorites} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
       default:
-        if (profile.role === 'client') return <CatalogPage profile={profile} catalog={catalog} favorites={favorites} onChange={() => loadData(profile)} toast={showToast} />
+        if (profile.role === 'client') return <CatalogPage profile={profile} catalog={catalog} favorites={favorites} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
         if (profile.role === 'foreman') return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
         return <Dashboard blocks={blocks} quarries={quarries} clients={clients} sales={sales} />
     }

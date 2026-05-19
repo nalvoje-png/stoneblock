@@ -734,23 +734,65 @@ export async function listOrders(profile) {
 }
 
 export async function createClientOrder(profile, blockId, message) {
-  // Cliente faz pedido — precisa achar o client record e company_id
+  // Cliente confirma a compra — vira uma venda direta
   const clientRec = await getClientByUser(profile.id)
   if (!clientRec) throw new Error('Você não está vinculado a um cliente.')
 
-  const { data, error } = await supabase
-    .from('orders')
+  // 1. Busca dados do bloco para o valor
+  const { data: block, error: blockErr } = await supabase
+    .from('blocks')
+    .select('*')
+    .eq('id', blockId)
+    .single()
+  if (blockErr) throw blockErr
+  if (block.status === 'sold') throw new Error('Esse bloco já foi vendido.')
+
+  // 2. Cria a venda (sem vendedor — venda direta do cliente)
+  const { data: sale, error: saleError } = await supabase
+    .from('sales')
     .insert({
       company_id: clientRec.company_id,
-      block_id: blockId,
+      seller_id: null,                            // venda direta sem vendedor
       client_id: clientRec.id,
-      status: 'purchase_request',
-      message: message || null,
+      payment_method_id: null,
+      dollar_rate: null,
+      total_brl: block.currency === 'BRL' ? block.total_value : 0,
+      total_usd: block.currency === 'USD' ? block.total_value : 0,
+      obs: message ? `Compra direta pelo catálogo. ${message}` : 'Compra direta pelo catálogo.',
     })
     .select()
     .single()
-  if (error) throw error
-  return data
+  if (saleError) throw saleError
+
+  // 3. Vincula bloco
+  await supabase.from('sale_blocks').insert({ sale_id: sale.id, block_id: blockId })
+
+  // 4. Marca bloco como vendido
+  await supabase.from('blocks').update({ status: 'sold', reserved_for: null }).eq('id', blockId)
+
+  // 5. Notifica o dono e vendedores da empresa
+  try {
+    const { data: ownersAndSellers } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('company_id', clientRec.company_id)
+      .in('role', ['owner', 'seller'])
+
+    if (ownersAndSellers && ownersAndSellers.length > 0) {
+      const notifs = ownersAndSellers.map(p => ({
+        user_id: p.id,
+        company_id: clientRec.company_id,
+        message: `🛒 ${clientRec.name} comprou o bloco ${block.code} (${block.material})`,
+        type: 'purchase',
+        read: false,
+      }))
+      await supabase.from('notifications').insert(notifs)
+    }
+  } catch (e) {
+    console.warn('Não foi possível notificar:', e)
+  }
+
+  return sale
 }
 
 export async function updateOrderStatus(id, status, message) {
