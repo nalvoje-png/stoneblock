@@ -675,6 +675,109 @@ function QuarriesPage({ profile, quarries, blocks, onChange, toast }) {
 }
 
 
+// ═══════════════════════════════════════════════════════════════
+// CLIENT USERS MANAGER — gerencia múltiplos acessos para um cliente
+// ═══════════════════════════════════════════════════════════════
+function ClientUsersManager({ profile, clientId, toast }) {
+  const [users, setUsers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [newUser, setNewUser] = useState({ name: '', email: '', password: '' })
+  const [saving, setSaving] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const list = await api.listClientUsers(clientId)
+      setUsers(list)
+    } catch (e) { console.error(e) }
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [clientId])
+
+  const addUser = async () => {
+    if (!newUser.name.trim()) { toast('Nome obrigatório.', 'err'); return }
+    if (!newUser.email.trim()) { toast('E-mail obrigatório.', 'err'); return }
+    if (!newUser.password || newUser.password.length < 6) { toast('Senha deve ter ao menos 6 caracteres.', 'err'); return }
+    setSaving(true)
+    try {
+      await api.addClientUser(profile, clientId, newUser.email.trim(), newUser.password, newUser.name.trim())
+      toast('Acesso criado com sucesso!', 'ok')
+      setNewUser({ name: '', email: '', password: '' })
+      setShowAddForm(false)
+      await load()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  const removeUser = async (cu) => {
+    if (!window.confirm(`Remover o acesso de ${cu.name}?`)) return
+    try {
+      await api.removeClientUser(cu.id)
+      toast('Acesso removido.', 'ok')
+      await load()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  return (
+    <div style={{ background: 'var(--sap1)', padding: 14, borderRadius: 10, marginTop: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div style={{ fontWeight: 700, color: 'var(--sap7)' }}>Acessos ao Sistema ({users.length})</div>
+        <button className="btn bo bsm" onClick={() => setShowAddForm(!showAddForm)}>
+          {showAddForm ? <><Icon n="x" s={13} /> Cancelar</> : <><Icon n="plus" s={13} /> Adicionar Acesso</>}
+        </button>
+      </div>
+
+      {loading ? (
+        <div style={{ fontSize: 13, color: 'var(--mist)', textAlign: 'center', padding: 10 }}>Carregando...</div>
+      ) : users.length === 0 && !showAddForm ? (
+        <div style={{ fontSize: 13, color: 'var(--mist)', padding: 8 }}>
+          Nenhum acesso criado. Clique em "Adicionar Acesso" para criar.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: showAddForm ? 12 : 0 }}>
+          {users.map(cu => (
+            <div key={cu.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#fff', borderRadius: 6, fontSize: 13 }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>{cu.name || 'Sem nome'}</div>
+                <div style={{ fontSize: 11, color: 'var(--mist)' }}>Criado em {fmtDate(cu.created_at)}</div>
+              </div>
+              <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => removeUser(cu)} title="Remover acesso">
+                <Icon n="trash" s={13} c="var(--err)" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showAddForm && (
+        <div style={{ background: '#fff', padding: 12, borderRadius: 8, border: '1px solid var(--fog)' }}>
+          <div className="fg" style={{ marginBottom: 8 }}>
+            <label className="fl">Nome do usuário *</label>
+            <input className="fc" value={newUser.name} onChange={e => setNewUser({ ...newUser, name: e.target.value })} placeholder="Ex: João da Silva" />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div className="fg" style={{ marginBottom: 8 }}>
+              <label className="fl">E-mail *</label>
+              <input className="fc" type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} placeholder="usuario@email.com" />
+            </div>
+            <div className="fg" style={{ marginBottom: 8 }}>
+              <label className="fl">Senha *</label>
+              <input className="fc" type="text" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} placeholder="Mínimo 6 caracteres" />
+            </div>
+          </div>
+          <button className="btn bb bsm" onClick={addUser} disabled={saving} style={{ width: '100%' }}>
+            {saving ? <><span className="spinner"></span> Criando</> : 'Criar Acesso'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CLIENTS PAGE
+// ═══════════════════════════════════════════════════════════════
 function ClientsPage({ profile, clients, onChange, toast }) {
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState(null)
