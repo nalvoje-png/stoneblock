@@ -1157,6 +1157,7 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
   const allMaterials = [...new Set(blocks.map(b => b.material).filter(Boolean))].sort()
   const filteredBlocks = blocks.filter(b => {
     if (b.status === 'reserve') return false  // Reserva Comercial não aparece na lista principal
+    if (b.status === 'sold') return false      // Vendidos têm página própria
     if (filterStatus && b.status !== filterStatus) return false
     if (filterMaterial && b.material !== filterMaterial) return false
     if (filterQuarry && b.quarry_id !== filterQuarry) return false
@@ -1220,10 +1221,9 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
       {/* Status filter */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         {[
-          { v: '', l: 'Todos', cnt: blocks.length },
+          { v: '', l: 'Todos', cnt: blocks.filter(b => b.status !== 'sold' && b.status !== 'reserve').length },
           { v: 'available', l: 'Disponíveis', cnt: blocks.filter(b => b.status === 'available').length },
           { v: 'reserved', l: 'Reservados', cnt: blocks.filter(b => b.status === 'reserved').length },
-          { v: 'sold', l: 'Vendidos', cnt: blocks.filter(b => b.status === 'sold').length },
         ].map(f => (
           <button key={f.v} className={'btn ' + (filterStatus === f.v ? 'bb' : 'bo') + ' bsm'} onClick={() => setFilterStatus(f.v)}>
             {f.l} ({f.cnt})
@@ -1285,6 +1285,11 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
                   <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: mobileGrid2 ? 14 : 16, color: 'var(--sap7)', marginBottom: 10 }}>{money(b.total_value, b.currency)}</div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {canEdit && <button className="btn bb bsm" onClick={() => openEdit(b)} title="Editar bloco"><Icon n="edit" s={13} c="#fff" /> Editar</button>}
+                    {canSell && (b.status === 'available' || b.status === 'reserved') && (
+                      <button className="btn bg bsm" onClick={() => { setSelectedIds([b.id]); setShowSaleModal(true) }} title="Vender este bloco" style={{ padding: '4px 8px' }}>
+                        <Icon n="cart" s={13} c="#fff" />
+                      </button>
+                    )}
                     {canReserve && b.status === 'available' && (
                       <button className="btn bo bsm" onClick={() => setReserveTarget(b)} title="Reservar para cliente" style={{ color: '#d97706' }}>🔒</button>
                     )}
@@ -1638,7 +1643,7 @@ function SaleModal({ profile, selectedBlocks, clients, payments, onClose, onSucc
     if (hasUSD && !dollarRate) { toast('Informe a cotação do dólar.', 'err'); return }
     setSaving(true)
     try {
-      await api.createSale(profile, {
+      const newSale = await api.createSale(profile, {
         client_id: clientId,
         payment_method_id: paymentId || null,
         dollar_rate: dollarRate ? Number(dollarRate) : null,
@@ -1646,7 +1651,23 @@ function SaleModal({ profile, selectedBlocks, clients, payments, onClose, onSucc
         total_usd: totalUSDBlocks,
         obs: obs.trim() || null,
       }, selectedBlocks.map(b => b.id))
+
       toast('Venda registrada com sucesso!', 'ok')
+
+      // Pergunta se quer imprimir o romaneio
+      if (window.confirm('Venda registrada! Deseja emitir o romaneio agora?')) {
+        // Monta o objeto sale com os dados necessários para o romaneio
+        const client = clients.find(c => c.id === clientId)
+        const payment = payments.find(p => p.id === paymentId)
+        const saleForRomaneio = {
+          ...newSale,
+          client: client ? { id: client.id, name: client.name, country: client.country } : null,
+          payment_method: payment ? { id: payment.id, name: payment.name } : null,
+          blocks: selectedBlocks,
+        }
+        await generateRomaneio(saleForRomaneio, profile)
+      }
+
       onSuccess()
     } catch (e) {
       console.error('Sale error:', e)
@@ -1785,7 +1806,24 @@ async function generateRomaneio(sale, profile) {
   // Calcula linhas vazias até completar 10 linhas (estética igual ao modelo)
   const numEmpty = Math.max(0, 10 - blocks.length)
 
-  const rowsHTML = blocks.map(b => `
+  const rowsHTML = blocks.map(b => {
+    // Calcula valor m³ em USD e BRL para preencher ambas colunas
+    let priceUSD = 0, priceBRL = 0
+    if (b.currency === 'USD') {
+      priceUSD = Number(b.price_m3) || 0
+      priceBRL = dollarRate > 0 ? priceUSD * dollarRate : 0
+    } else {
+      priceBRL = Number(b.price_m3) || 0
+      priceUSD = dollarRate > 0 ? priceBRL / dollarRate : 0
+    }
+    // Total: usa o valor da venda na moeda original
+    let totalCell = ''
+    if (b.currency === 'BRL') {
+      totalCell = fmtBRL(b.total_value)
+    } else if (b.currency === 'USD') {
+      totalCell = 'US$ ' + fmtNum(b.total_value)
+    }
+    return `
     <tr>
       <td class="num">${b.code || ''}</td>
       <td class="ctr">${b.classification || ''}</td>
@@ -1793,12 +1831,12 @@ async function generateRomaneio(sale, profile) {
       <td class="num">${fmtNum(b.net_h)}</td>
       <td class="num">${fmtNum(b.net_w)}</td>
       <td class="num">${fmtNum(b.net_volume)}</td>
-      <td class="num">${b.currency === 'USD' ? fmtNum(b.price_m3) : ''}</td>
-      <td class="num">${b.currency === 'BRL' ? fmtBRL(b.price_m3) : ''}</td>
-      <td class="num">${b.currency === 'BRL' ? fmtBRL(b.total_value) : (b.currency === 'USD' ? 'US$ ' + fmtNum(b.total_value) : '')}</td>
+      <td class="num">${priceUSD > 0 ? fmtNum(priceUSD) : ''}</td>
+      <td class="num">${priceBRL > 0 ? fmtBRL(priceBRL) : ''}</td>
+      <td class="num">${totalCell}</td>
       <td class="ctr">${b.classification || ''}</td>
     </tr>
-  `).join('')
+  `}).join('')
 
   const emptyRows = Array(numEmpty).fill(`
     <tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
@@ -1894,7 +1932,10 @@ ${dollarRate > 0 ? `
 <div class="obs-area">
   <div class="obs-box">
     <div class="obs-label">Observações:</div>
-    <div class="obs-content">${sale.obs || ''}</div>
+    <div class="obs-content">${[
+      sale.payment_method?.name ? 'Forma de pagamento: ' + sale.payment_method.name : '',
+      sale.obs || ''
+    ].filter(Boolean).join('<br>')}</div>
   </div>
   <div class="obs-box">
     <div class="sig-line">${companyName}</div>
@@ -3150,6 +3191,183 @@ function OrdersPage({ profile, orders, onChange, toast }) {
 // ═══════════════════════════════════════════════════════════════
 // RESERVE COMMERCIAL PAGE — blocos guardados estrategicamente
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// SOLD BLOCKS PAGE — histórico de blocos vendidos
+// ═══════════════════════════════════════════════════════════════
+function SoldBlocksPage({ profile, blocks, quarries, sales, onChange, toast }) {
+  const [detailBlock, setDetailBlock] = useState(null)
+  const [filterMaterial, setFilterMaterial] = useState('')
+  const [filterQuarry, setFilterQuarry] = useState('')
+  const [filterPeriod, setFilterPeriod] = useState('all')
+  const [filterClient, setFilterClient] = useState('')
+  const [dtInicio, setDtInicio] = useState('')
+  const [dtFim, setDtFim] = useState('')
+
+  // Cria um mapa block_id -> sale info (cliente, data)
+  const blockSaleInfo = {}
+  ;(sales || []).forEach(s => {
+    ;(s.blocks || []).forEach(b => {
+      blockSaleInfo[b.id] = {
+        client: s.client?.name || '—',
+        clientId: s.client_id,
+        date: s.created_at,
+        sale: s,
+      }
+    })
+  })
+
+  const soldBlocks = blocks.filter(b => b.status === 'sold')
+  const allMaterials = [...new Set(soldBlocks.map(b => b.material).filter(Boolean))].sort()
+  const allClients = [...new Set(Object.values(blockSaleInfo).map(x => x.client).filter(c => c !== '—'))].sort()
+
+  const filteredBlocks = soldBlocks.filter(b => {
+    if (filterMaterial && b.material !== filterMaterial) return false
+    if (filterQuarry && b.quarry_id !== filterQuarry) return false
+    const info = blockSaleInfo[b.id]
+    if (filterClient && info?.client !== filterClient) return false
+    const refDate = info?.date || b.updated_at || b.created_at
+    if (filterPeriod !== 'all' && filterPeriod !== 'custom' && refDate) {
+      const d = new Date(refDate)
+      const now = new Date()
+      if (filterPeriod === 'month') {
+        if (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false
+      } else if (filterPeriod === 'last_month') {
+        const last = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        if (d.getMonth() !== last.getMonth() || d.getFullYear() !== last.getFullYear()) return false
+      } else if (filterPeriod === 'year') {
+        if (d.getFullYear() !== now.getFullYear()) return false
+      }
+    }
+    if (filterPeriod === 'custom' && refDate) {
+      const d = new Date(refDate)
+      if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
+      if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+    }
+    return true
+  })
+
+  const totalBRL = filteredBlocks.filter(b => b.currency === 'BRL').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+  const totalUSD = filteredBlocks.filter(b => b.currency === 'USD').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+
+  const hasFilter = filterMaterial || filterQuarry || filterClient || filterPeriod !== 'all'
+
+  return (
+    <div>
+      <div className="ph">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="ptit">✅ Blocos Vendidos</div>
+            <div className="psub">{filteredBlocks.length} bloco(s) {hasFilter ? `de ${soldBlocks.length}` : ''}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Resumo */}
+      {filteredBlocks.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12, marginBottom: 16 }}>
+          <div className="card" style={{ background: 'linear-gradient(135deg,#10b981,#059669)', border: 'none' }}>
+            <div className="cb">
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Total Vendido R$</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 26, color: '#fff' }}>{money(totalBRL, 'BRL')}</div>
+            </div>
+          </div>
+          {totalUSD > 0 && (
+            <div className="card" style={{ background: 'linear-gradient(135deg,#0c1a2e,#1e3a8a)', border: 'none' }}>
+              <div className="cb">
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Total Vendido US$</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 26, color: '#fff' }}>{money(totalUSD, 'USD')}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Filtros */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="cb" style={{ padding: '12px 14px' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Filtros:</span>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
+              <option value="all">Todos os períodos</option>
+              <option value="month">Mês atual</option>
+              <option value="last_month">Mês anterior</option>
+              <option value="year">Ano atual</option>
+              <option value="custom">Período personalizado</option>
+            </select>
+            {filterPeriod === 'custom' && (
+              <>
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} onChange={e => setDtInicio(e.target.value)} />
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} onChange={e => setDtFim(e.target.value)} />
+              </>
+            )}
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+              <option value="">Todas as pedreiras</option>
+              {quarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+            </select>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+              <option value="">Todos os materiais</option>
+              {allMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterClient} onChange={e => setFilterClient(e.target.value)}>
+              <option value="">Todos os clientes</option>
+              {allClients.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            {hasFilter && (
+              <button className="btn bo bsm" onClick={() => { setFilterMaterial(''); setFilterQuarry(''); setFilterClient(''); setFilterPeriod('all'); setDtInicio(''); setDtFim('') }}>
+                <Icon n="x" s={13} /> Limpar
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {filteredBlocks.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
+          <div className="estit">Nenhum bloco vendido encontrado</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
+          {filteredBlocks.map(b => {
+            const q = quarries.find(x => x.id === b.quarry_id)
+            const info = blockSaleInfo[b.id]
+            return (
+              <div key={b.id} className="card" style={{ position: 'relative', borderTop: '4px solid #ef4444', cursor: 'pointer' }} onClick={() => setDetailBlock(b)}>
+                {b.photos && b.photos.length > 0 && b.photos[0]
+                  ? <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 160, objectFit: 'cover', background: 'var(--haze)', filter: 'grayscale(20%)' }} />
+                  : <div style={{ height: 130, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>}
+                <div className="cb">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15 }}>{b.code}</div>
+                    <span className="bdg" style={{ background: '#fecaca', color: '#991b1b' }}>✅ Vendido</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 4 }}>{b.material}</div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 6 }}>📍 {q?.name || '—'} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                  {info && (
+                    <div style={{ fontSize: 12, color: '#991b1b', marginBottom: 6, background: '#fef2f2', padding: '4px 8px', borderRadius: 4 }}>
+                      🛒 {info.client}
+                      <span style={{ color: 'var(--mist)', marginLeft: 4 }}>· {fmtDate(info.date)}</span>
+                    </div>
+                  )}
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, color: 'var(--sap7)' }}>{money(b.total_value, b.currency)}</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {detailBlock && (
+        <BlockDetailModal
+          block={detailBlock}
+          quarry={quarries.find(q => q.id === detailBlock.quarry_id)}
+          onClose={() => setDetailBlock(null)}
+        />
+      )}
+    </div>
+  )
+}
+
 function ReserveCommercialPage({ profile, blocks, quarries, clients, payments, onChange, toast }) {
   const [detailBlock, setDetailBlock] = useState(null)
   const [selectedIds, setSelectedIds] = useState([])
@@ -4053,7 +4271,7 @@ export default function App() {
       { p: 'blocks',      l: 'Blocos',            i: 'cube' },
       { p: 'reserve',     l: 'Reserva Comercial', i: 'cube' },
       { p: 'sales',       l: 'Vendas',            i: 'cart' },
-      { p: 'orders',      l: 'Pedidos',           i: 'cart' },
+      { p: 'sold_blocks', l: 'Blocos Vendidos',   i: 'check' },
       { p: 'releases',    l: 'Liberar Catálogo',  i: 'check' },
       { p: 'commissions', l: 'Comissões',         i: 'dolar' },
       { p: 'quarries',    l: 'Pedreiras',         i: 'mtn' },
@@ -4069,18 +4287,17 @@ export default function App() {
     ]
   } else if (profile.role === 'seller') {
     NAV = [
-      { p: 'dashboard', l: 'Dashboard',         i: 'grid' },
-      { p: 'blocks',    l: 'Blocos',            i: 'cube' },
-      { p: 'reserve',   l: 'Reserva Comercial', i: 'cube' },
-      { p: 'sales',     l: 'Minhas Vendas',     i: 'cart' },
-      { p: 'orders',    l: 'Pedidos',           i: 'cart' },
-      { p: 'releases',  l: 'Liberar Catálogo',  i: 'check' },
-      { p: 'clients',   l: 'Clientes',          i: 'user' },
+      { p: 'dashboard',   l: 'Dashboard',         i: 'grid' },
+      { p: 'blocks',      l: 'Blocos',            i: 'cube' },
+      { p: 'reserve',     l: 'Reserva Comercial', i: 'cube' },
+      { p: 'sales',       l: 'Minhas Vendas',     i: 'cart' },
+      { p: 'sold_blocks', l: 'Blocos Vendidos',   i: 'check' },
+      { p: 'releases',    l: 'Liberar Catálogo',  i: 'check' },
+      { p: 'clients',     l: 'Clientes',          i: 'user' },
     ]
   } else if (profile.role === 'client') {
     NAV = [
       { p: 'catalog', l: 'Catálogo',         i: 'cube' },
-      { p: 'orders',  l: 'Meus Pedidos',     i: 'cart' },
     ]
   }
 
@@ -4089,7 +4306,7 @@ export default function App() {
       case 'dashboard':   return <Dashboard blocks={blocks} quarries={quarries} clients={clients} sales={sales} />
       case 'blocks':      return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
       case 'sales':       return <SalesPage profile={profile} sales={sales} blocks={blocks} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
-      case 'orders':      return <OrdersPage profile={profile} orders={orders} onChange={() => loadData(profile)} toast={showToast} />
+      case 'sold_blocks': return <SoldBlocksPage profile={profile} blocks={blocks} quarries={quarries} sales={sales} onChange={() => loadData(profile)} toast={showToast} />
       case 'releases':    return <ReleasesPage profile={profile} blocks={blocks} clients={clients} releases={releases} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
       case 'reserve':     return <ReserveCommercialPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
       case 'commissions': return <CommissionsPage profile={profile} sales={sales} team={team} toast={showToast} />
