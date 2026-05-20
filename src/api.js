@@ -665,6 +665,83 @@ export async function uploadBlockPhoto(profile, file, blockCode) {
   return data.publicUrl
 }
 
+// Upload de foto de material (amostra)
+export async function uploadMaterialPhoto(profile, file, matName) {
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const cleanName = (matName || 'mat').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)
+  const path = `${profile.id}/materials/${Date.now()}_${cleanName}.${ext || 'jpg'}`
+
+  const { error } = await supabase.storage
+    .from('block-photos')
+    .upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type || 'image/jpeg'
+    })
+  if (error) throw new Error(error.message || 'Falha no upload')
+
+  const { data } = supabase.storage.from('block-photos').getPublicUrl(path)
+  return data.publicUrl
+}
+
+// Upload de logo do perfil/empresa
+export async function uploadProfileLogo(profile, file) {
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const path = `${profile.id}/logo/${Date.now()}.${ext || 'jpg'}`
+
+  const { error } = await supabase.storage
+    .from('block-photos')
+    .upload(path, file, {
+      cacheControl: '3600',
+      upsert: true,
+      contentType: file.type || 'image/jpeg'
+    })
+  if (error) throw new Error(error.message || 'Falha no upload')
+
+  const { data } = supabase.storage.from('block-photos').getPublicUrl(path)
+  return data.publicUrl
+}
+
+// Atualiza perfil
+export async function updateProfile(profileId, payload) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .update(payload)
+    .eq('id', profileId)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+// Busca perfil do dono da empresa pelo company_id (para usar no romaneio)
+export async function getCompanyOwnerProfile(companyId) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, name, company_name, logo_url')
+    .eq('id', companyId)
+    .maybeSingle()
+  if (error) throw error
+  return data
+}
+
+// ─── COMMERCIAL RESERVE (mover bloco para reserva) ──────────────
+export async function moveToReserve(blockId) {
+  const { error } = await supabase
+    .from('blocks')
+    .update({ status: 'reserve', moved_to_reserve_at: new Date().toISOString(), reserved_for: null })
+    .eq('id', blockId)
+  if (error) throw error
+}
+
+export async function moveBackFromReserve(blockId) {
+  const { error } = await supabase
+    .from('blocks')
+    .update({ status: 'available', moved_to_reserve_at: null })
+    .eq('id', blockId)
+  if (error) throw error
+}
+
 // ─── REALTIME ───────────────────────────────────────────────────
 // Sincroniza mudanças entre dispositivos em tempo real
 export function subscribeRealtime(profile, onChange) {

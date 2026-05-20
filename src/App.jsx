@@ -1654,6 +1654,172 @@ function SaleModal({ profile, selectedBlocks, clients, payments, onClose, onSucc
 // ═══════════════════════════════════════════════════════════════
 // SALES HISTORY PAGE
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// ROMANEIO — gera o HTML imprimível e abre janela de impressão
+// ═══════════════════════════════════════════════════════════════
+async function generateRomaneio(sale, profile) {
+  // Busca dados do dono da empresa (nome + logo)
+  let owner = null
+  try {
+    owner = await api.getCompanyOwnerProfile(sale.company_id)
+  } catch (e) { console.warn('Não foi possível carregar dono:', e) }
+
+  const companyName = (owner?.company_name || owner?.name || 'EMPRESA').toUpperCase()
+  const logoUrl = owner?.logo_url || ''
+
+  const dt = new Date(sale.created_at)
+  const dataFmt = `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`
+
+  const blocks = sale.blocks || []
+  const totalM3 = blocks.reduce((a, b) => a + (Number(b.net_volume) || 0), 0)
+  const totalBRL = Number(sale.total_brl) || 0
+  const totalUSD = Number(sale.total_usd) || 0
+  const dollarRate = Number(sale.dollar_rate) || 0
+
+  const fmtNum = (n, d = 2) => Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d })
+  const fmtBRL = (n) => 'R$ ' + Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  // Calcula linhas vazias até completar 10 linhas (estética igual ao modelo)
+  const numEmpty = Math.max(0, 10 - blocks.length)
+
+  const rowsHTML = blocks.map(b => `
+    <tr>
+      <td class="num">${b.code || ''}</td>
+      <td class="ctr">${b.classification || ''}</td>
+      <td class="num">${fmtNum(b.net_l)}</td>
+      <td class="num">${fmtNum(b.net_h)}</td>
+      <td class="num">${fmtNum(b.net_w)}</td>
+      <td class="num">${fmtNum(b.net_volume)}</td>
+      <td class="num">${b.currency === 'USD' ? fmtNum(b.price_m3) : ''}</td>
+      <td class="num">${b.currency === 'BRL' ? fmtBRL(b.price_m3) : ''}</td>
+      <td class="num">${b.currency === 'BRL' ? fmtBRL(b.total_value) : (b.currency === 'USD' ? 'US$ ' + fmtNum(b.total_value) : '')}</td>
+      <td class="ctr">${b.classification || ''}</td>
+    </tr>
+  `).join('')
+
+  const emptyRows = Array(numEmpty).fill(`
+    <tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+  `).join('')
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Romaneio - ${sale.client?.name || ''}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; padding: 20px; color: #000; font-size: 12px; }
+  .topo { background: #b8b8b8; padding: 8px 12px; display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .topo img { max-height: 48px; max-width: 100px; object-fit: contain; }
+  .topo h1 { font-size: 18px; letter-spacing: 1px; }
+  .cab { display: grid; grid-template-columns: auto 1fr; gap: 0; margin-bottom: 14px; width: 60%; }
+  .cab .lbl { background: #fff; border: 1px solid #888; padding: 4px 10px; font-weight: bold; }
+  .cab .val { border: 1px solid #888; border-left: none; padding: 4px 10px; }
+  .dolar-row { display: grid; grid-template-columns: auto 1fr; gap: 0; margin-bottom: 14px; width: 30%; }
+  .dolar-row .lbl { background: #fff; border: 1px solid #888; padding: 4px 10px; font-weight: bold; }
+  .dolar-row .val { border: 1px solid #888; border-left: none; padding: 4px 10px; text-align: center; font-weight: bold; }
+  .titulo { background: #c5d4eb; padding: 6px; text-align: center; font-weight: bold; font-size: 14px; margin-bottom: 0; border: 1px solid #888; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #888; padding: 4px 6px; font-size: 11px; }
+  th { background: #e5e5e5; font-weight: bold; text-align: center; }
+  .group-h { background: #fff; text-align: center; font-weight: bold; }
+  td.num { text-align: right; }
+  td.ctr { text-align: center; }
+  .totais { background: #d4d4d4; }
+  .totais td { font-weight: bold; }
+  .obs-area { margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+  .obs-box { }
+  .obs-label { font-weight: bold; margin-bottom: 6px; }
+  .obs-content { background: #e8f0fa; min-height: 70px; padding: 8px; border-bottom: 1px solid #000; }
+  .sig-line { border-top: 1px solid #000; padding-top: 6px; text-align: center; font-weight: bold; margin-top: 60px; }
+  @media print { body { padding: 10mm; } }
+</style>
+</head>
+<body>
+
+<div class="topo">
+  ${logoUrl ? `<img src="${logoUrl}" alt="logo">` : ''}
+  <h1>${companyName}</h1>
+</div>
+
+<div class="cab">
+  <div class="lbl">Cliente:</div><div class="val">${(sale.client?.name || '').toUpperCase()}</div>
+  <div class="lbl">Data:</div><div class="val">${dataFmt}</div>
+</div>
+
+${dollarRate > 0 ? `
+<div class="dolar-row">
+  <div class="lbl">Dolar:</div><div class="val">${fmtNum(dollarRate)}</div>
+</div>
+` : ''}
+
+<div class="titulo">Romaneio de Venda</div>
+
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">Código</th>
+      <th rowspan="2">Tipo</th>
+      <th colspan="4" class="group-h">Medidas Líquidas</th>
+      <th rowspan="2">Vr M3 U$:</th>
+      <th rowspan="2">Valor M3 R$:</th>
+      <th rowspan="2">Total:</th>
+      <th rowspan="2">Class.:</th>
+    </tr>
+    <tr>
+      <th>Comp.:</th>
+      <th>Alt.:</th>
+      <th>Larg.:</th>
+      <th>Total:</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${rowsHTML}
+    ${emptyRows}
+    <tr class="totais">
+      <td colspan="2"></td>
+      <td colspan="3" style="text-align:right;">Total M3 Líquido:</td>
+      <td class="num">${fmtNum(totalM3)}</td>
+      <td></td>
+      <td style="text-align:right;">Total:</td>
+      <td class="num">${totalBRL > 0 ? fmtBRL(totalBRL) : (totalUSD > 0 ? 'US$ ' + fmtNum(totalUSD) : '')}</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="obs-area">
+  <div class="obs-box">
+    <div class="obs-label">Observações:</div>
+    <div class="obs-content">${sale.obs || ''}</div>
+  </div>
+  <div class="obs-box">
+    <div class="sig-line">${companyName}</div>
+  </div>
+</div>
+
+<script>
+  window.onload = function() {
+    setTimeout(function(){ window.print(); }, 500);
+  };
+</script>
+</body>
+</html>`
+
+  // Abre nova janela com o HTML
+  const win = window.open('', '_blank')
+  if (!win) {
+    alert('Bloqueador de pop-up impediu a abertura do romaneio. Permita pop-ups deste site.')
+    return
+  }
+  win.document.write(html)
+  win.document.close()
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// SALES HISTORY PAGE
+// ═══════════════════════════════════════════════════════════════
 function SalesPage({ profile, sales, blocks, quarries, onChange, toast }) {
   const [dtInicio, setDtInicio] = useState('')
   const [dtFim, setDtFim] = useState('')
@@ -1809,7 +1975,12 @@ function SalesPage({ profile, sales, blocks, quarries, onChange, toast }) {
                 <div className="mtit">Detalhes da Venda</div>
                 <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>{fmtDate(detailSale.created_at)}</div>
               </div>
-              <button className="btn bo bsm" onClick={() => setDetailSale(null)}><Icon n="x" s={14} /></button>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn bb bsm" onClick={() => generateRomaneio(detailSale, profile)} title="Imprimir Romaneio">
+                  🖨️ Romaneio
+                </button>
+                <button className="btn bo bsm" onClick={() => setDetailSale(null)}><Icon n="x" s={14} /></button>
+              </div>
             </div>
             <div className="mbody">
               {/* Cliente / Vendedor / Pagamento */}
@@ -2147,7 +2318,7 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
   const [saving, setSaving] = useState(false)
   const [detailBlock, setDetailBlock] = useState(null)
 
-  const availableBlocks = blocks.filter(b => b.status === 'available' || b.status === 'reserved')
+  const availableBlocks = blocks.filter(b => b.status === 'available' || b.status === 'reserved' || b.status === 'reserve')
 
   // Map of block_id => Set of client_ids that already have access
   const releaseMap = {}
@@ -3521,6 +3692,95 @@ function NotificationsPanel({ profile, notifications, onChange, onClose }) {
 // ═══════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// SETTINGS MODAL — edita perfil/empresa (nome, logo)
+// ═══════════════════════════════════════════════════════════════
+function SettingsModal({ profile, onClose, onSaved, toast }) {
+  const [companyName, setCompanyName] = useState(profile.company_name || '')
+  const [logoUrl, setLogoUrl] = useState(profile.logo_url || '')
+  const [uploading, setUploading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const handleLogoUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) { toast('Logo muito grande (máx. 5MB)', 'err'); return }
+    if (!file.type.startsWith('image/')) { toast('Arquivo inválido', 'err'); return }
+    setUploading(true)
+    try {
+      const url = await api.uploadProfileLogo(profile, file)
+      setLogoUrl(url)
+      toast('Logo enviada!', 'ok')
+    } catch (err) {
+      toast('Erro: ' + err.message, 'err')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api.updateProfile(profile.id, {
+        company_name: companyName.trim() || null,
+        logo_url: logoUrl || null,
+      })
+      toast('Configurações salvas!', 'ok')
+      onSaved()
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div className="mtit">⚙️ Configurações</div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          <div className="fg">
+            <label className="fl">Nome da Empresa (exibido no romaneio)</label>
+            <input className="fc" value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Ex: MINERAÇÃO VMC" />
+          </div>
+
+          <div className="fg">
+            <label className="fl">Logo da Empresa</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+              {logoUrl ? (
+                <div style={{ position: 'relative' }}>
+                  <img src={logoUrl} alt="Logo" style={{ width: 80, height: 80, objectFit: 'contain', background: 'var(--haze)', borderRadius: 8, border: '1px solid var(--fog)' }} />
+                  <button
+                    onClick={() => setLogoUrl('')}
+                    title="Remover logo"
+                    style={{ position: 'absolute', top: -6, right: -6, background: 'rgba(0,0,0,.8)', color: '#fff', border: 'none', width: 22, height: 22, borderRadius: '50%', cursor: 'pointer' }}>×</button>
+                </div>
+              ) : (
+                <div style={{ width: 80, height: 80, background: 'var(--haze)', borderRadius: 8, border: '1px dashed var(--fog)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--mist)', fontSize: 11 }}>
+                  Sem logo
+                </div>
+              )}
+              <div style={{ flex: 1 }}>
+                <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={uploading} style={{ fontSize: 13 }} />
+                {uploading && <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 4 }}><span className="spinner"></span> Enviando...</div>}
+                <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 6 }}>JPG/PNG até 5MB. Aparece no PDF do romaneio.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose}>Cancelar</button>
+          <button className="btn bb" onClick={save} disabled={saving || uploading}>
+            {saving ? <><span className="spinner"></span> Salvando</> : 'Salvar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [profile, setProfile]     = useState(null)
   const [loading, setLoading]     = useState(true)
@@ -3538,6 +3798,7 @@ export default function App() {
     setPage(initial[profile.role] || 'dashboard')
   }, [profile?.id, profile?.role])
   const [sbOpen,  setSbOpen]      = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [toast,   setToast]       = useState(null)
 
   const [quarries, setQuarries]   = useState([])
@@ -3793,11 +4054,28 @@ export default function App() {
                   <div className="sbur">{ROLE_LABEL[profile.role]}</div>
                 </div>
               </div>
+              {profile.role === 'owner' && (
+                <button className="lobtn" onClick={() => setShowSettings(true)} style={{ marginBottom: 6 }}>
+                  <Icon n="edit" s={14} /> Configurações
+                </button>
+              )}
               <button className="lobtn" onClick={handleLogout}><Icon n="out" s={14} /> Sair</button>
             </div>
           </div>
           <div className="main">{renderPage()}</div>
         </div>
+
+        {showSettings && (
+          <SettingsModal
+            profile={profile}
+            onClose={() => setShowSettings(false)}
+            onSaved={async () => {
+              setShowSettings(false)
+              await loadData(profile)
+            }}
+            toast={showToast}
+          />
+        )}
 
         {toast && <div className={'toast ' + toast.type}>{toast.msg}</div>}
       </div>
