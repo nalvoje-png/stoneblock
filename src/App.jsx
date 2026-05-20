@@ -238,13 +238,18 @@ function LoginPage({ onLoginSuccess }) {
 // ═══════════════════════════════════════════════════════════════
 function Dashboard({ blocks, quarries, clients, sales }) {
   const [filterQuarry, setFilterQuarry] = useState('')
+  const [filterMaterial, setFilterMaterial] = useState('')
   const [filterPeriod, setFilterPeriod] = useState('all')
   const [dtInicio, setDtInicio] = useState('')
   const [dtFim, setDtFim] = useState('')
 
+  // Materials disponíveis dos blocos
+  const allMaterials = [...new Set(blocks.map(b => b.material).filter(Boolean))].sort()
+
   // Apply filters
   const filteredBlocks = blocks.filter(b => {
     if (filterQuarry && b.quarry_id !== filterQuarry) return false
+    if (filterMaterial && b.material !== filterMaterial) return false
     if (filterPeriod !== 'all' && filterPeriod !== 'custom') {
       const d = new Date(b.prod_date || b.created_at)
       const now = new Date()
@@ -297,6 +302,11 @@ function Dashboard({ blocks, quarries, clients, sales }) {
       const hasFromQuarry = (s.blocks || []).some(b => b.quarry_id === filterQuarry)
       if (!hasFromQuarry) return false
     }
+    // Filtro de material: pelo menos um bloco deve ser do material
+    if (filterMaterial) {
+      const hasMaterial = (s.blocks || []).some(b => b.material === filterMaterial)
+      if (!hasMaterial) return false
+    }
     return true
   })
 
@@ -332,8 +342,12 @@ function Dashboard({ blocks, quarries, clients, sales }) {
               <option value="">Todas as pedreiras</option>
               {quarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
             </select>
-            {(filterPeriod !== 'all' || filterQuarry) && (
-              <button className="btn bo bsm" onClick={() => { setFilterPeriod('all'); setFilterQuarry(''); setDtInicio(''); setDtFim('') }}>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+              <option value="">Todos os materiais</option>
+              {allMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            {(filterPeriod !== 'all' || filterQuarry || filterMaterial) && (
+              <button className="btn bo bsm" onClick={() => { setFilterPeriod('all'); setFilterQuarry(''); setFilterMaterial(''); setDtInicio(''); setDtFim('') }}>
                 <Icon n="x" s={13} /> Limpar
               </button>
             )}
@@ -431,12 +445,24 @@ function Dashboard({ blocks, quarries, clients, sales }) {
 function QuarriesPage({ profile, quarries, blocks, onChange, toast }) {
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState(null)
-  const [form, setForm] = useState({ name: '', location: '', materials: [] })
+  const [form, setForm] = useState({ name: '', location: '', materials: [], material_photos: {} })
   const [matInput, setMatInput] = useState('')
   const [saving, setSaving] = useState(false)
+  const [uploadingMat, setUploadingMat] = useState(null)
 
-  const openNew = () => { setForm({ name: '', location: '', materials: [] }); setMatInput(''); setEditId(null); setShowForm(true) }
-  const openEdit = q => { setForm({ name: q.name, location: q.location || '', materials: q.materials || [] }); setMatInput(''); setEditId(q.id); setShowForm(true) }
+  const openNew = () => {
+    setForm({ name: '', location: '', materials: [], material_photos: {} })
+    setMatInput(''); setEditId(null); setShowForm(true)
+  }
+  const openEdit = q => {
+    setForm({
+      name: q.name,
+      location: q.location || '',
+      materials: q.materials || [],
+      material_photos: q.material_photos || {},
+    })
+    setMatInput(''); setEditId(q.id); setShowForm(true)
+  }
 
   const addMat = () => {
     const m = matInput.trim()
@@ -444,6 +470,37 @@ function QuarriesPage({ profile, quarries, blocks, onChange, toast }) {
     if (form.materials.includes(m)) { toast('Material já adicionado.', 'err'); return }
     setForm({ ...form, materials: [...form.materials, m] })
     setMatInput('')
+  }
+
+  const removeMat = (m) => {
+    const newPhotos = { ...form.material_photos }
+    delete newPhotos[m]
+    setForm({ ...form, materials: form.materials.filter(x => x !== m), material_photos: newPhotos })
+  }
+
+  const handleMatPhoto = async (e, matName) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) { toast('Foto muito grande (máx. 5MB)', 'err'); return }
+    if (!file.type.startsWith('image/')) { toast('Arquivo inválido', 'err'); return }
+
+    setUploadingMat(matName)
+    try {
+      const url = await api.uploadMaterialPhoto(profile, file, matName)
+      setForm(prev => ({ ...prev, material_photos: { ...prev.material_photos, [matName]: url } }))
+      toast('Foto enviada!', 'ok')
+    } catch (err) {
+      toast('Erro: ' + err.message, 'err')
+    } finally {
+      setUploadingMat(null)
+      e.target.value = ''
+    }
+  }
+
+  const removeMatPhoto = (matName) => {
+    const newPhotos = { ...form.material_photos }
+    delete newPhotos[matName]
+    setForm({ ...form, material_photos: newPhotos })
   }
 
   const save = async () => {
@@ -503,8 +560,22 @@ function QuarriesPage({ profile, quarries, blocks, onChange, toast }) {
                 </div>
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 6, fontWeight: 700 }}>Materiais</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                    {(q.materials || []).map(m => <span key={m} className="bdg" style={{ background: 'var(--sap1)', color: 'var(--sap7)' }}>{m}</span>)}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {(q.materials || []).map(m => {
+                      const photo = q.material_photos?.[m]
+                      return (
+                        <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', background: 'var(--haze)', borderRadius: 6 }}>
+                          {photo ? (
+                            <img src={photo} alt={m} style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }} />
+                          ) : (
+                            <div style={{ width: 36, height: 36, background: '#fff', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <Icon n="cube" s={16} c="var(--mist)" />
+                            </div>
+                          )}
+                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--sap7)' }}>{m}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -532,138 +603,78 @@ function QuarriesPage({ profile, quarries, blocks, onChange, toast }) {
                 <label className="fl">Localização</label>
                 <input className="fc" value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} placeholder="Ex: Cachoeiro de Itapemirim, ES" />
               </div>
+
               <div className="fg">
                 <label className="fl">Materiais *</label>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
                   <input className="fc" value={matInput} onChange={e => setMatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addMat())} placeholder="Ex: Granito Verde Ubatuba" />
                   <button className="btn bb bsm" onClick={addMat}><Icon n="plus" s={13} c="#fff" /></button>
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {form.materials.map(m => (
-                    <span key={m} className="bdg" style={{ background: 'var(--sap1)', color: 'var(--sap7)', cursor: 'pointer' }} onClick={() => setForm({ ...form, materials: form.materials.filter(x => x !== m) })}>
-                      {m} ×
-                    </span>
-                  ))}
-                </div>
+
+                {form.materials.length > 0 && (
+                  <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 10 }}>
+                      Foto da amostra (opcional)
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {form.materials.map(m => {
+                        const photo = form.material_photos[m]
+                        const isUploading = uploadingMat === m
+                        return (
+                          <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 8, background: '#fff', borderRadius: 6 }}>
+                            {photo ? (
+                              <div style={{ position: 'relative', flexShrink: 0 }}>
+                                <img src={photo} alt={m} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 5 }} />
+                                <button
+                                  onClick={() => removeMatPhoto(m)}
+                                  title="Remover foto"
+                                  style={{ position: 'absolute', top: -4, right: -4, background: 'rgba(0,0,0,.75)', color: '#fff', border: 'none', width: 18, height: 18, borderRadius: '50%', cursor: 'pointer', fontSize: 11 }}>×</button>
+                              </div>
+                            ) : (
+                              <div style={{ width: 48, height: 48, background: 'var(--haze)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                <Icon n="cube" s={20} c="var(--mist)" />
+                              </div>
+                            )}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--sap7)' }}>{m}</div>
+                              {isUploading ? (
+                                <div style={{ fontSize: 11, color: 'var(--mist)' }}><span className="spinner"></span> Enviando...</div>
+                              ) : (
+                                <label style={{ fontSize: 11, color: 'var(--sap6)', cursor: 'pointer', textDecoration: 'underline' }}>
+                                  {photo ? 'Trocar foto' : '+ Adicionar foto'}
+                                  <input type="file" accept="image/*" onChange={e => handleMatPhoto(e, m)} style={{ display: 'none' }} />
+                                </label>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => removeMat(m)}
+                              title="Remover material"
+                              className="btn bo bsm"
+                              style={{ color: 'var(--err)', padding: '4px 8px' }}>
+                              <Icon n="trash" s={12} c="var(--err)" />
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <div className="mfoot">
               <button className="btn bo" onClick={() => setShowForm(false)}>Cancelar</button>
-              <button className="btn bb" onClick={save} disabled={saving}>{saving ? <><span className="spinner"></span> Salvando</> : 'Salvar'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ═══════════════════════════════════════════════════════════════
-// CLIENTS
-// ═══════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════
-// CLIENT USERS MANAGER — gerencia múltiplos acessos para um cliente
-// ═══════════════════════════════════════════════════════════════
-function ClientUsersManager({ profile, clientId, toast }) {
-  const [users, setUsers] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [newUser, setNewUser] = useState({ name: '', email: '', password: '' })
-  const [saving, setSaving] = useState(false)
-
-  const load = async () => {
-    setLoading(true)
-    try {
-      const list = await api.listClientUsers(clientId)
-      setUsers(list)
-    } catch (e) { console.error(e) }
-    setLoading(false)
-  }
-
-  useEffect(() => { load() }, [clientId])
-
-  const addUser = async () => {
-    if (!newUser.name.trim()) { toast('Nome obrigatório.', 'err'); return }
-    if (!newUser.email.trim()) { toast('E-mail obrigatório.', 'err'); return }
-    if (!newUser.password || newUser.password.length < 6) { toast('Senha deve ter ao menos 6 caracteres.', 'err'); return }
-    setSaving(true)
-    try {
-      await api.addClientUser(profile, clientId, newUser.email.trim(), newUser.password, newUser.name.trim())
-      toast('Acesso criado com sucesso!', 'ok')
-      setNewUser({ name: '', email: '', password: '' })
-      setShowAddForm(false)
-      await load()
-    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
-  }
-
-  const removeUser = async (cu) => {
-    if (!window.confirm(`Remover o acesso de ${cu.name}?`)) return
-    try {
-      await api.removeClientUser(cu.id)
-      toast('Acesso removido.', 'ok')
-      await load()
-    } catch (e) { toast('Erro: ' + e.message, 'err') }
-  }
-
-  return (
-    <div style={{ background: 'var(--sap1)', padding: 14, borderRadius: 10, marginTop: 8 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <div style={{ fontWeight: 700, color: 'var(--sap7)' }}>Acessos ao Sistema ({users.length})</div>
-        <button className="btn bo bsm" onClick={() => setShowAddForm(!showAddForm)}>
-          {showAddForm ? <><Icon n="x" s={13} /> Cancelar</> : <><Icon n="plus" s={13} /> Adicionar Acesso</>}
-        </button>
-      </div>
-
-      {loading ? (
-        <div style={{ fontSize: 13, color: 'var(--mist)', textAlign: 'center', padding: 10 }}>Carregando...</div>
-      ) : users.length === 0 && !showAddForm ? (
-        <div style={{ fontSize: 13, color: 'var(--mist)', padding: 8 }}>
-          Nenhum acesso criado. Clique em "Adicionar Acesso" para criar.
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: showAddForm ? 12 : 0 }}>
-          {users.map(cu => (
-            <div key={cu.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#fff', borderRadius: 6, fontSize: 13 }}>
-              <div>
-                <div style={{ fontWeight: 600 }}>{cu.name || 'Sem nome'}</div>
-                <div style={{ fontSize: 11, color: 'var(--mist)' }}>Criado em {fmtDate(cu.created_at)}</div>
-              </div>
-              <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => removeUser(cu)} title="Remover acesso">
-                <Icon n="trash" s={13} c="var(--err)" />
+              <button className="btn bb" onClick={save} disabled={saving}>
+                {saving ? <><span className="spinner"></span> Salvando</> : 'Salvar'}
               </button>
             </div>
-          ))}
-        </div>
-      )}
-
-      {showAddForm && (
-        <div style={{ background: '#fff', padding: 12, borderRadius: 8, border: '1px solid var(--fog)' }}>
-          <div className="fg" style={{ marginBottom: 8 }}>
-            <label className="fl">Nome do usuário *</label>
-            <input className="fc" value={newUser.name} onChange={e => setNewUser({ ...newUser, name: e.target.value })} placeholder="Ex: João da Silva" />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <div className="fg" style={{ marginBottom: 8 }}>
-              <label className="fl">E-mail *</label>
-              <input className="fc" type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} placeholder="usuario@email.com" />
-            </div>
-            <div className="fg" style={{ marginBottom: 8 }}>
-              <label className="fl">Senha *</label>
-              <input className="fc" type="text" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} placeholder="Mínimo 6 caracteres" />
-            </div>
-          </div>
-          <button className="btn bb bsm" onClick={addUser} disabled={saving} style={{ width: '100%' }}>
-            {saving ? <><span className="spinner"></span> Criando</> : 'Criar Acesso'}
-          </button>
         </div>
       )}
     </div>
   )
 }
 
-// ═══════════════════════════════════════════════════════════════
-// CLIENTS PAGE
-// ═══════════════════════════════════════════════════════════════
+
 function ClientsPage({ profile, clients, onChange, toast }) {
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState(null)
@@ -1026,6 +1037,15 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
     } catch (e) { toast('Erro: ' + e.message, 'err') }
   }
 
+  const moveToReserve = async (b) => {
+    if (!window.confirm(`Mover o bloco ${b.code} para a Reserva Comercial?`)) return
+    try {
+      await api.moveToReserve(b.id)
+      await onChange()
+      toast(`Bloco ${b.code} movido para Reserva Comercial.`, 'ok')
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
   const STATUS_CLR = { produced: '#64748b', available: '#10b981', reserved: '#f59e0b', sold: '#ef4444' }
   const STATUS_LBL = { produced: 'Produzido', available: 'Disponível', reserved: 'Reservado', sold: 'Vendido' }
 
@@ -1033,6 +1053,7 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
   // Unique materials and quarries for filter dropdowns
   const allMaterials = [...new Set(blocks.map(b => b.material).filter(Boolean))].sort()
   const filteredBlocks = blocks.filter(b => {
+    if (b.status === 'reserve') return false  // Reserva Comercial não aparece na lista principal
     if (filterStatus && b.status !== filterStatus) return false
     if (filterMaterial && b.material !== filterMaterial) return false
     if (filterQuarry && b.quarry_id !== filterQuarry) return false
@@ -1160,12 +1181,15 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
                   <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 10 }}>📍 {q?.name || '—'} · {(b.net_volume || 0).toFixed(2)} m³</div>
                   <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: mobileGrid2 ? 14 : 16, color: 'var(--sap7)', marginBottom: 10 }}>{money(b.total_value, b.currency)}</div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {canEdit && <button className="btn bo bsm" onClick={() => openEdit(b)} title="Editar"><Icon n="edit" s={13} /></button>}
+                    {canEdit && <button className="btn bb bsm" onClick={() => openEdit(b)} title="Editar bloco"><Icon n="edit" s={13} c="#fff" /> Editar</button>}
                     {canReserve && b.status === 'available' && (
-                      <button className="btn bo bsm" onClick={() => setReserveTarget(b)} title="Reservar" style={{ color: '#d97706' }}>🔒</button>
+                      <button className="btn bo bsm" onClick={() => setReserveTarget(b)} title="Reservar para cliente" style={{ color: '#d97706' }}>🔒</button>
                     )}
                     {canReserve && b.status === 'reserved' && (
                       <button className="btn bo bsm" onClick={() => unreserve(b)} title="Desfazer reserva">🔓</button>
+                    )}
+                    {canReserve && (b.status === 'available' || b.status === 'reserved') && (
+                      <button className="btn bo bsm" onClick={() => moveToReserve(b)} title="Mover para Reserva Comercial" style={{ color: '#7c3aed' }}>📦</button>
                     )}
                     {canEdit && <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => del(b)} title="Excluir"><Icon n="trash" s={13} c="var(--err)" /></button>}
                   </div>
@@ -1634,10 +1658,17 @@ function SalesPage({ profile, sales, blocks, quarries, onChange, toast }) {
   const [dtInicio, setDtInicio] = useState('')
   const [dtFim, setDtFim] = useState('')
   const [filterClient, setFilterClient] = useState('')
+  const [filterQuarry, setFilterQuarry] = useState('')
+  const [filterMaterial, setFilterMaterial] = useState('')
   const [detailSale, setDetailSale] = useState(null)
   const [detailBlock, setDetailBlock] = useState(null)
 
   const today = new Date().toISOString().slice(0, 10)
+
+  // Materiais únicos das vendas
+  const salesMaterials = [...new Set(
+    sales.flatMap(s => (s.blocks || []).map(b => b.material).filter(Boolean))
+  )].sort()
 
   // Filtered sales
   const filtered = sales.filter(s => {
@@ -1645,6 +1676,14 @@ function SalesPage({ profile, sales, blocks, quarries, onChange, toast }) {
     if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
     if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
     if (filterClient && s.client?.name?.toLowerCase().indexOf(filterClient.toLowerCase()) === -1) return false
+    if (filterQuarry) {
+      const hasFromQuarry = (s.blocks || []).some(b => b.quarry_id === filterQuarry)
+      if (!hasFromQuarry) return false
+    }
+    if (filterMaterial) {
+      const hasMaterial = (s.blocks || []).some(b => b.material === filterMaterial)
+      if (!hasMaterial) return false
+    }
     return true
   })
 
@@ -1702,8 +1741,16 @@ function SalesPage({ profile, sales, blocks, quarries, onChange, toast }) {
               <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} min={dtInicio} max={today} onChange={e => setDtFim(e.target.value)} />
             </div>
             <input className="fc" style={{ fontSize: 13, padding: '7px 12px', flex: '1 1 180px' }} placeholder="Buscar cliente..." value={filterClient} onChange={e => setFilterClient(e.target.value)} />
-            {(dtInicio || dtFim || filterClient) && (
-              <button className="btn bo bsm" onClick={() => { setDtInicio(''); setDtFim(''); setFilterClient('') }}>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+              <option value="">Todas as pedreiras</option>
+              {(quarries || []).map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+            </select>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+              <option value="">Todos os materiais</option>
+              {salesMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            {(dtInicio || dtFim || filterClient || filterQuarry || filterMaterial) && (
+              <button className="btn bo bsm" onClick={() => { setDtInicio(''); setDtFim(''); setFilterClient(''); setFilterQuarry(''); setFilterMaterial('') }}>
                 <Icon n="x" s={13} /> Limpar
               </button>
             )}
@@ -2092,12 +2139,13 @@ function TeamPage({ profile, team, onChange, toast }) {
 // ═══════════════════════════════════════════════════════════════
 // RELEASES PAGE — liberar catálogo de blocos para clientes
 // ═══════════════════════════════════════════════════════════════
-function ReleasesPage({ profile, blocks, clients, releases, onChange, toast }) {
+function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, toast }) {
   const [step, setStep] = useState(1) // 1=blocos, 2=clientes, 3=confirmar
   const [selectedBlocks, setSelectedBlocks] = useState([])
   const [selectedClients, setSelectedClients] = useState([])
   const [showReleaseFlow, setShowReleaseFlow] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [detailBlock, setDetailBlock] = useState(null)
 
   const availableBlocks = blocks.filter(b => b.status === 'available' || b.status === 'reserved')
 
@@ -2158,21 +2206,31 @@ function ReleasesPage({ profile, blocks, clients, releases, onChange, toast }) {
       ) : (
         <div className="card"><div className="tw"><table>
           <thead><tr>
-            <th>Bloco</th><th>Cliente</th><th>Liberado por</th><th>Data</th><th></th>
+            <th></th><th>Bloco</th><th>Cliente</th><th>Liberado por</th><th>Data</th><th></th>
           </tr></thead>
           <tbody>
             {releases.map(r => {
               const b = blocks.find(x => x.id === r.block_id)
+              const photo = b?.photos && b.photos[0]
               return (
-                <tr key={r.id}>
+                <tr key={r.id} style={{ cursor: b ? 'pointer' : 'default' }} onClick={() => b && setDetailBlock(b)}>
+                  <td style={{ width: 56 }}>
+                    {photo ? (
+                      <img src={photo} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 5 }} />
+                    ) : (
+                      <div style={{ width: 44, height: 44, background: 'var(--haze)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Icon n="cube" s={18} c="var(--mist)" />
+                      </div>
+                    )}
+                  </td>
                   <td>
                     <strong style={{ color: 'var(--sap7)' }}>{b?.code || '—'}</strong>
-                    <span style={{ color: 'var(--mist)', marginLeft: 6, fontSize: 13 }}>{b?.material}</span>
+                    <div style={{ color: 'var(--mist)', fontSize: 12 }}>{b?.material}</div>
                   </td>
                   <td style={{ fontWeight: 600 }}>{r.client?.name || '—'}</td>
                   <td style={{ fontSize: 13 }}>{r.liberador?.name || '—'}</td>
                   <td style={{ fontSize: 13, color: 'var(--mist)' }}>{fmtDate(r.data_liberacao)}</td>
-                  <td>
+                  <td onClick={e => e.stopPropagation()}>
                     <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => revoke(r.block_id, r.client_id)}>
                       <Icon n="trash" s={13} c="var(--err)" /> Revogar
                     </button>
@@ -2182,6 +2240,15 @@ function ReleasesPage({ profile, blocks, clients, releases, onChange, toast }) {
             })}
           </tbody>
         </table></div></div>
+      )}
+
+      {/* Block detail modal */}
+      {detailBlock && (
+        <BlockDetailModal
+          block={detailBlock}
+          quarry={(quarries || []).find(q => q.id === detailBlock.quarry_id)}
+          onClose={() => setDetailBlock(null)}
+        />
       )}
 
       {/* Release flow modal */}
@@ -2806,6 +2873,461 @@ function OrdersPage({ profile, orders, onChange, toast }) {
 // ═══════════════════════════════════════════════════════════════
 // COMMISSIONS PAGE — relatório de comissões por vendedor
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// RESERVE COMMERCIAL PAGE — blocos guardados estrategicamente
+// ═══════════════════════════════════════════════════════════════
+function ReserveCommercialPage({ profile, blocks, quarries, clients, payments, onChange, toast }) {
+  const [detailBlock, setDetailBlock] = useState(null)
+  const [selectedIds, setSelectedIds] = useState([])
+  const [showSaleModal, setShowSaleModal] = useState(false)
+  const [filterMaterial, setFilterMaterial] = useState('')
+  const [filterQuarry, setFilterQuarry] = useState('')
+
+  const reserveBlocks = blocks.filter(b => b.status === 'reserve')
+  const allMaterials = [...new Set(reserveBlocks.map(b => b.material).filter(Boolean))].sort()
+
+  const filteredBlocks = reserveBlocks.filter(b => {
+    if (filterMaterial && b.material !== filterMaterial) return false
+    if (filterQuarry && b.quarry_id !== filterQuarry) return false
+    return true
+  })
+
+  const canSell = profile.role === 'owner' || profile.role === 'seller'
+  const selectedBlocks = blocks.filter(b => selectedIds.includes(b.id))
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+  const clearSelection = () => setSelectedIds([])
+
+  const moveBack = async (b) => {
+    if (!window.confirm(`Voltar o bloco ${b.code} para o estoque principal?`)) return
+    try {
+      await api.moveBackFromReserve(b.id)
+      await onChange()
+      toast(`Bloco ${b.code} voltou para o estoque.`, 'ok')
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="ptit">📦 Reserva Comercial</div>
+            <div className="psub">{filteredBlocks.length} bloco(s) em reserva estratégica</div>
+          </div>
+          {selectedIds.length > 0 && canSell && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn bg" onClick={() => setShowSaleModal(true)}>
+                <Icon n="cart" s={16} c="#fff" /> Vender {selectedIds.length} bloco(s)
+              </button>
+              <button className="btn bo" onClick={clearSelection}><Icon n="x" s={14} /> Limpar</button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ background: '#f3e8ff', border: '1px solid #d8b4fe', padding: 12, borderRadius: 10, marginBottom: 16, fontSize: 13, color: '#6b21a8' }}>
+        💡 Esta é uma área para blocos que você quer guardar estrategicamente. Eles não aparecem no estoque principal, mas podem ser vendidos ou liberados para catálogo diretamente daqui, ou voltar para o estoque.
+      </div>
+
+      {/* Filtros */}
+      {reserveBlocks.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+            <option value="">Todos os materiais</option>
+            {allMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+          <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+            <option value="">Todas as pedreiras</option>
+            {quarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+          </select>
+          {(filterMaterial || filterQuarry) && (
+            <button className="btn bo bsm" onClick={() => { setFilterMaterial(''); setFilterQuarry('') }}>
+              <Icon n="x" s={13} /> Limpar filtros
+            </button>
+          )}
+        </div>
+      )}
+
+      {filteredBlocks.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
+          <div className="estit">Nenhum bloco na Reserva Comercial</div>
+          <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>
+            Para mover um bloco, vá na tela "Blocos" e clique no ícone 📦 do bloco que deseja guardar.
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
+          {filteredBlocks.map(b => {
+            const q = quarries.find(x => x.id === b.quarry_id)
+            const isSelected = selectedIds.includes(b.id)
+            return (
+              <div key={b.id} className="card" style={{ position: 'relative', borderTop: '4px solid #a855f7', ...(isSelected && { boxShadow: '0 0 0 3px var(--sap5)', borderColor: 'var(--sap5)' }) }}>
+                {canSell && (
+                  <div onClick={() => toggleSelect(b.id)} style={{ position: 'absolute', top: 8, left: 8, zIndex: 2, width: 28, height: 28, background: isSelected ? 'var(--sap6)' : 'rgba(255,255,255,.9)', border: '2px solid ' + (isSelected ? 'var(--sap6)' : 'var(--fog)'), borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                    {isSelected && <Icon n="check" s={14} c="#fff" />}
+                  </div>
+                )}
+                <button onClick={() => setDetailBlock(b)} title="Ver detalhes" style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, width: 28, height: 28, background: 'rgba(255,255,255,.95)', border: '1px solid var(--fog)', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🔍</button>
+
+                {b.photos && b.photos.length > 0 && b.photos[0]
+                  ? <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 160, objectFit: 'cover', background: 'var(--haze)', cursor: 'pointer' }} onClick={() => setDetailBlock(b)} />
+                  : <div style={{ height: 130, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>}
+                <div className="cb">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15 }}>{b.code}</div>
+                    <span className="bdg" style={{ background: '#f3e8ff', color: '#6b21a8' }}>📦 Reserva</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 6 }}>{b.material}</div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 4 }}>📍 {q?.name || '—'} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                  {b.moved_to_reserve_at && (
+                    <div style={{ fontSize: 11, color: '#6b21a8', marginBottom: 6 }}>Em reserva desde {fmtDate(b.moved_to_reserve_at)}</div>
+                  )}
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, color: 'var(--sap7)', marginBottom: 10 }}>{money(b.total_value, b.currency)}</div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    <button className="btn bb bsm" onClick={() => moveBack(b)} title="Voltar para Estoque">
+                      ↩️ Voltar p/ Estoque
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {detailBlock && (
+        <BlockDetailModal
+          block={detailBlock}
+          quarry={quarries.find(q => q.id === detailBlock.quarry_id)}
+          onClose={() => setDetailBlock(null)}
+        />
+      )}
+
+      {showSaleModal && (
+        <SaleModal
+          profile={profile}
+          selectedBlocks={selectedBlocks}
+          clients={clients}
+          payments={payments}
+          onClose={() => setShowSaleModal(false)}
+          onSuccess={async () => {
+            setShowSaleModal(false)
+            clearSelection()
+            await onChange()
+          }}
+          toast={toast}
+        />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// COMMERCIAL RESERVE PAGE — blocos transferidos da lista principal
+// ═══════════════════════════════════════════════════════════════
+function CommercialReservePage({ profile, blocks, quarries, clients, payments, onChange, toast }) {
+  const [selectedIds, setSelectedIds] = useState([])
+  const [showSaleModal, setShowSaleModal] = useState(false)
+  const [showReleaseModal, setShowReleaseModal] = useState(false)
+  const [detailBlock, setDetailBlock] = useState(null)
+  const [filterMaterial, setFilterMaterial] = useState('')
+  const [filterQuarry, setFilterQuarry] = useState('')
+
+  // Apenas blocos com status 'reserve'
+  const reserveBlocks = blocks.filter(b => b.status === 'reserve')
+
+  const allMaterials = [...new Set(reserveBlocks.map(b => b.material).filter(Boolean))].sort()
+  const filtered = reserveBlocks.filter(b => {
+    if (filterMaterial && b.material !== filterMaterial) return false
+    if (filterQuarry && b.quarry_id !== filterQuarry) return false
+    return true
+  })
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+  const clearSelection = () => setSelectedIds([])
+  const selectedBlocks = blocks.filter(b => selectedIds.includes(b.id))
+
+  const canSell = profile.role === 'owner' || profile.role === 'seller'
+  const canRelease = profile.role === 'owner' || profile.role === 'seller'
+
+  const moveBack = async (b) => {
+    if (!window.confirm(`Voltar o bloco ${b.code} para a base principal?`)) return
+    try {
+      await api.moveBackFromReserve(b.id)
+      await onChange()
+      toast(`Bloco ${b.code} voltou para a base principal.`, 'ok')
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const moveBackMulti = async () => {
+    if (selectedIds.length === 0) return
+    if (!window.confirm(`Voltar ${selectedIds.length} bloco(s) para a base principal?`)) return
+    try {
+      for (const id of selectedIds) {
+        await api.moveBackFromReserve(id)
+      }
+      clearSelection()
+      await onChange()
+      toast(`${selectedIds.length} bloco(s) voltaram para a base.`, 'ok')
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const STATUS_CLR = { reserve: '#7c3aed' }
+  const STATUS_LBL = { reserve: 'Reserva Comercial' }
+
+  return (
+    <div>
+      <div className="ph">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="ptit">📦 Reserva Comercial</div>
+            <div className="psub">{filtered.length} bloco(s) · estoque estratégico</div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {selectedIds.length > 0 && (
+              <>
+                {canSell && (
+                  <button className="btn bg" onClick={() => setShowSaleModal(true)}>
+                    <Icon n="cart" s={16} c="#fff" /> Vender {selectedIds.length}
+                  </button>
+                )}
+                {canRelease && (
+                  <button className="btn bb" onClick={() => setShowReleaseModal(true)}>
+                    📢 Liberar p/ Catálogo
+                  </button>
+                )}
+                <button className="btn bo" onClick={moveBackMulti} title="Voltar para base">
+                  ↩️ Voltar p/ Base
+                </button>
+                <button className="btn bo" onClick={clearSelection}>
+                  <Icon n="x" s={14} /> Limpar
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Filtros */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+          <option value="">Todos os materiais</option>
+          {allMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+          <option value="">Todas as pedreiras</option>
+          {(quarries || []).map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+        </select>
+        {(filterMaterial || filterQuarry) && (
+          <button className="btn bo bsm" onClick={() => { setFilterMaterial(''); setFilterQuarry('') }}>
+            <Icon n="x" s={13} /> Limpar
+          </button>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3, fontSize: 48 }}>📦</div>
+          <div className="estit">Nenhum bloco na Reserva Comercial</div>
+          <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>
+            Use o botão 📦 nos blocos da lista principal para movê-los para cá.
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
+          {filtered.map(b => {
+            const q = (quarries || []).find(x => x.id === b.quarry_id)
+            const isSel = selectedIds.includes(b.id)
+            const daysInReserve = b.moved_to_reserve_at
+              ? Math.floor((new Date() - new Date(b.moved_to_reserve_at)) / (1000 * 60 * 60 * 24))
+              : null
+            return (
+              <div key={b.id} className="card" style={{ position: 'relative', ...(isSel && { boxShadow: '0 0 0 3px var(--sap5)', borderColor: 'var(--sap5)' }) }}>
+                <div onClick={() => toggleSelect(b.id)} style={{ position: 'absolute', top: 8, left: 8, zIndex: 2, width: 28, height: 28, background: isSel ? 'var(--sap6)' : 'rgba(255,255,255,.9)', border: '2px solid ' + (isSel ? 'var(--sap6)' : 'var(--fog)'), borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                  {isSel && <Icon n="check" s={14} c="#fff" />}
+                </div>
+                <button onClick={() => setDetailBlock(b)} title="Ver detalhes" style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, width: 28, height: 28, background: 'rgba(255,255,255,.95)', border: '1px solid var(--fog)', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  🔍
+                </button>
+
+                {b.photos && b.photos.length > 0 && b.photos[0] ? (
+                  <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 160, objectFit: 'cover', background: 'var(--haze)', cursor: 'pointer' }} onClick={() => setDetailBlock(b)} />
+                ) : (
+                  <div style={{ height: 130, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon n="cube" s={32} c="var(--mist)" />
+                  </div>
+                )}
+                <div className="cb">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 4 }}>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15 }}>{b.code}</div>
+                    <span className="bdg" style={{ background: '#ede9fe', color: '#7c3aed', fontSize: 11 }}>📦 Reserva</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 6 }}>{b.material}</div>
+                  {daysInReserve !== null && (
+                    <div style={{ fontSize: 11, color: '#7c3aed', marginBottom: 6, fontWeight: 600 }}>
+                      Em reserva há {daysInReserve} dia(s)
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 10 }}>📍 {q?.name || '—'} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, color: 'var(--sap7)', marginBottom: 10 }}>{money(b.total_value, b.currency)}</div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    <button className="btn bo bsm" onClick={() => moveBack(b)} title="Voltar para base principal">
+                      ↩️ Voltar p/ Base
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Sale modal */}
+      {showSaleModal && (
+        <SaleModal
+          profile={profile}
+          selectedBlocks={selectedBlocks}
+          clients={clients}
+          payments={payments}
+          onClose={() => setShowSaleModal(false)}
+          onSuccess={async () => {
+            setShowSaleModal(false)
+            clearSelection()
+            await onChange()
+          }}
+          toast={toast}
+        />
+      )}
+
+      {/* Release modal */}
+      {showReleaseModal && (
+        <ReserveReleaseModal
+          profile={profile}
+          selectedBlocks={selectedBlocks}
+          clients={clients}
+          onClose={() => setShowReleaseModal(false)}
+          onSuccess={async () => {
+            setShowReleaseModal(false)
+            clearSelection()
+            await onChange()
+          }}
+          toast={toast}
+        />
+      )}
+
+      {/* Detail modal */}
+      {detailBlock && (
+        <BlockDetailModal
+          block={detailBlock}
+          quarry={(quarries || []).find(q => q.id === detailBlock.quarry_id)}
+          onClose={() => setDetailBlock(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RESERVE RELEASE MODAL — liberar blocos da reserva p/ catálogo
+// ═══════════════════════════════════════════════════════════════
+function ReserveReleaseModal({ profile, selectedBlocks, clients, onClose, onSuccess, toast }) {
+  const [selectedClients, setSelectedClients] = useState([])
+  const [saving, setSaving] = useState(false)
+
+  const toggleClient = (id) => {
+    setSelectedClients(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+
+  const confirm = async () => {
+    if (selectedClients.length === 0) { toast('Selecione ao menos um cliente.', 'err'); return }
+    setSaving(true)
+    try {
+      // Primeiro volta os blocos para "available" (precisa estar disponível para ser liberado)
+      for (const b of selectedBlocks) {
+        await api.moveBackFromReserve(b.id)
+      }
+      // Depois libera para os clientes
+      const blockIds = selectedBlocks.map(b => b.id)
+      await api.releaseBlocksToClients(profile, blockIds, selectedClients)
+      toast(`${blockIds.length} bloco(s) liberado(s) para ${selectedClients.length} cliente(s).`, 'ok')
+      onSuccess()
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 580 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div className="mtit">📢 Liberar para Catálogo</div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8, marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 8 }}>
+              Blocos da reserva ({selectedBlocks.length})
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {selectedBlocks.map(b => (
+                <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', background: '#fff', borderRadius: 6, fontSize: 13 }}>
+                  {b.photos?.[0] && <img src={b.photos[0]} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 4 }} />}
+                  <div style={{ flex: 1 }}>
+                    <strong style={{ color: 'var(--sap7)' }}>{b.code}</strong>
+                    <span style={{ color: 'var(--mist)', marginLeft: 6 }}>· {b.material}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ background: '#fffbeb', padding: 10, borderRadius: 6, fontSize: 12, color: '#92400e', marginBottom: 14 }}>
+            ⚠️ Os blocos serão movidos para a base principal e liberados para os clientes selecionados.
+          </div>
+
+          <div className="fg">
+            <label className="fl">Clientes que terão acesso *</label>
+            {clients.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--mist)', padding: 12, textAlign: 'center', background: 'var(--haze)', borderRadius: 6 }}>
+                Nenhum cliente cadastrado.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+                {clients.map(c => {
+                  const sel = selectedClients.includes(c.id)
+                  return (
+                    <div key={c.id} onClick={() => toggleClient(c.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, border: '2px solid ' + (sel ? 'var(--sap6)' : 'var(--fog)'), background: sel ? 'var(--sap1)' : '#fff', borderRadius: 6, cursor: 'pointer' }}>
+                      <div style={{ width: 20, height: 20, borderRadius: 4, background: sel ? 'var(--sap6)' : '#fff', border: '2px solid ' + (sel ? 'var(--sap6)' : 'var(--fog)'), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {sel && <Icon n="check" s={12} c="#fff" />}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--mist)' }}>{c.country}</div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose}>Cancelar</button>
+          <button className="btn bb" onClick={confirm} disabled={saving || selectedClients.length === 0}>
+            {saving ? <><span className="spinner"></span> Liberando</> : 'Confirmar Liberação'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CommissionsPage({ profile, sales, team, toast }) {
   const [dtInicio, setDtInicio] = useState('')
   const [dtFim, setDtFim] = useState('')
@@ -3165,6 +3687,7 @@ export default function App() {
     NAV = [
       { p: 'dashboard',   l: 'Dashboard',         i: 'grid' },
       { p: 'blocks',      l: 'Blocos',            i: 'cube' },
+      { p: 'reserve',     l: 'Reserva Comercial', i: 'cube' },
       { p: 'sales',       l: 'Vendas',            i: 'cart' },
       { p: 'orders',      l: 'Pedidos',           i: 'cart' },
       { p: 'releases',    l: 'Liberar Catálogo',  i: 'check' },
@@ -3177,12 +3700,14 @@ export default function App() {
   } else if (profile.role === 'foreman') {
     NAV = [
       { p: 'blocks',    l: 'Blocos',            i: 'cube' },
+      { p: 'reserve',   l: 'Reserva Comercial', i: 'cube' },
       { p: 'quarries',  l: 'Pedreiras',         i: 'mtn' },
     ]
   } else if (profile.role === 'seller') {
     NAV = [
       { p: 'dashboard', l: 'Dashboard',         i: 'grid' },
       { p: 'blocks',    l: 'Blocos',            i: 'cube' },
+      { p: 'reserve',   l: 'Reserva Comercial', i: 'cube' },
       { p: 'sales',     l: 'Minhas Vendas',     i: 'cart' },
       { p: 'orders',    l: 'Pedidos',           i: 'cart' },
       { p: 'releases',  l: 'Liberar Catálogo',  i: 'check' },
@@ -3201,7 +3726,8 @@ export default function App() {
       case 'blocks':      return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
       case 'sales':       return <SalesPage profile={profile} sales={sales} blocks={blocks} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
       case 'orders':      return <OrdersPage profile={profile} orders={orders} onChange={() => loadData(profile)} toast={showToast} />
-      case 'releases':    return <ReleasesPage profile={profile} blocks={blocks} clients={clients} releases={releases} onChange={() => loadData(profile)} toast={showToast} />
+      case 'releases':    return <ReleasesPage profile={profile} blocks={blocks} clients={clients} releases={releases} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
+      case 'reserve':     return <ReserveCommercialPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
       case 'commissions': return <CommissionsPage profile={profile} sales={sales} team={team} toast={showToast} />
       case 'quarries':    return <QuarriesPage profile={profile} quarries={quarries} blocks={blocks} onChange={() => loadData(profile)} toast={showToast} />
       case 'team':        return <TeamPage profile={profile} team={team} onChange={() => loadData(profile)} toast={showToast} />
