@@ -539,14 +539,13 @@ export async function createTeamMember(profile, email, password, payload) {
 }
 
 export async function updateTeamMember(id, payload) {
-  const { data, error } = await supabase
+  // Update sem requerer select() — evita erro de RLS no read-back
+  const { error } = await supabase
     .from('profiles')
     .update(payload)
     .eq('id', id)
-    .select()
-    .single()
   if (error) throw error
-  return data
+  return { id, ...payload }
 }
 
 // ─── BLOCK RELEASES (catálogo liberado para clientes) ───────────
@@ -704,14 +703,12 @@ export async function uploadProfileLogo(profile, file) {
 
 // Atualiza perfil
 export async function updateProfile(profileId, payload) {
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('profiles')
     .update(payload)
     .eq('id', profileId)
-    .select()
-    .single()
   if (error) throw error
-  return data
+  return { id: profileId, ...payload }
 }
 
 // Busca perfil do dono da empresa pelo company_id (para usar no romaneio)
@@ -746,37 +743,47 @@ export async function moveBackFromReserve(blockId) {
 // Sincroniza mudanças entre dispositivos em tempo real
 export function subscribeRealtime(profile, onChange) {
   const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+  console.log('[Realtime] Subscribing for company_id:', companyId)
+
+  const handler = (table) => (payload) => {
+    console.log(`[Realtime] ${table} event:`, payload.eventType, payload.new?.id || payload.old?.id)
+    onChange(table)
+  }
 
   const channel = supabase
-    .channel('stoneblock-realtime')
+    .channel('stoneblock-realtime-' + Date.now())
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'blocks', filter: `company_id=eq.${companyId}` },
-        () => onChange('blocks'))
+        handler('blocks'))
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'quarries', filter: `company_id=eq.${companyId}` },
-        () => onChange('quarries'))
+        handler('quarries'))
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'clients', filter: `company_id=eq.${companyId}` },
-        () => onChange('clients'))
+        handler('clients'))
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'payment_methods', filter: `company_id=eq.${companyId}` },
-        () => onChange('payment_methods'))
+        handler('payment_methods'))
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'sales', filter: `company_id=eq.${companyId}` },
-        () => onChange('sales'))
+        handler('sales'))
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'block_releases', filter: `company_id=eq.${companyId}` },
-        () => onChange('block_releases'))
+        handler('block_releases'))
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'profiles', filter: `company_id=eq.${companyId}` },
-        () => onChange('profiles'))
-    .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'orders', filter: `company_id=eq.${companyId}` },
-        () => onChange('orders'))
+        handler('profiles'))
     .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${profile.id}` },
-        () => onChange('notifications'))
-    .subscribe()
+        handler('notifications'))
+    .subscribe((status, err) => {
+      console.log('[Realtime] Status:', status, err || '')
+      if (status === 'SUBSCRIBED') {
+        console.log('[Realtime] ✓ Connected successfully')
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        console.error('[Realtime] ✗ Connection problem:', status, err)
+      }
+    })
 
   return channel
 }

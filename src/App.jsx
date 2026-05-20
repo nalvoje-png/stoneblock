@@ -3246,7 +3246,7 @@ function SoldBlocksPage({ profile, blocks, quarries, sales, onChange, toast }) {
     return true
   })
 
-  const totalBRL = filteredBlocks.filter(b => b.currency === 'BRL').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+  const totalBRL = filteredBlocks.filter(b => !b.currency || b.currency === 'BRL').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
   const totalUSD = filteredBlocks.filter(b => b.currency === 'USD').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
 
   const hasFilter = filterMaterial || filterQuarry || filterClient || filterPeriod !== 'all'
@@ -4218,9 +4218,27 @@ export default function App() {
       loadData(profile).catch(err => console.error('realtime reload:', err))
     })
 
+    // Fallback 1: polling a cada 15s (caso o realtime falhe)
+    const pollInterval = setInterval(() => {
+      console.log('[Polling] Auto-refresh')
+      loadData(profile).catch(err => console.error('poll reload:', err))
+    }, 15000)
+
+    // Fallback 2: recarrega ao voltar foco para a janela
+    const handleFocus = () => {
+      console.log('[Focus] Window focused, reloading')
+      loadData(profile).catch(err => console.error('focus reload:', err))
+    }
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) handleFocus()
+    })
+
     return () => {
       console.log('Cleaning up realtime')
       api.unsubscribeRealtime(channel)
+      clearInterval(pollInterval)
+      window.removeEventListener('focus', handleFocus)
     }
   }, [profile, loadData])
 
@@ -4361,7 +4379,12 @@ export default function App() {
           <div className={'sb' + (sbOpen ? ' open' : '')}>
             <div className="sblbl">Menu</div>
             {NAV.map(it => (
-              <div key={it.p} className={'sbni' + (page === it.p ? ' on' : '')} onClick={() => { setPage(it.p); setSbOpen(false) }}>
+              <div key={it.p} className={'sbni' + (page === it.p ? ' on' : '')} onClick={() => {
+                setPage(it.p)
+                setSbOpen(false)
+                // Recarrega dados ao trocar de página (garante dados frescos)
+                loadData(profile).catch(err => console.error('nav reload:', err))
+              }}>
                 <Icon n={it.i} s={15} />
                 <span>{it.l}</span>
               </div>
