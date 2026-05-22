@@ -3,7 +3,7 @@
 // Stone Block — Sistema de gestão para pedreiras
 // Integrado com Supabase: Auth, PostgreSQL, Storage
 // ═══════════════════════════════════════════════════════════════
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import * as api from './api'
 
 // ─── CSS ────────────────────────────────────────────────────────
@@ -1268,7 +1268,14 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
                 </button>
 
                 {b.photos && b.photos.length > 0 && b.photos[0]
-                  ? <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: mobileGrid2 ? 110 : 160, objectFit: 'cover', background: 'var(--haze)', cursor: 'pointer' }} onClick={() => setDetailBlock(b)} onError={(e) => { e.target.style.display = 'none' }} />
+                  ? <div style={{ position: 'relative' }}>
+                      <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: mobileGrid2 ? 110 : 160, objectFit: 'cover', background: 'var(--haze)', cursor: 'pointer', display: 'block' }} onClick={() => setDetailBlock(b)} onError={(e) => { e.target.style.display = 'none' }} />
+                      {b.photos.length > 1 && (
+                        <div style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,.65)', color: '#fff', padding: '3px 9px', borderRadius: 12, fontSize: 11, fontWeight: 600, backdropFilter: 'blur(6px)', pointerEvents: 'none' }}>
+                          📷 {b.photos.length}
+                        </div>
+                      )}
+                    </div>
                   : <div style={{ height: mobileGrid2 ? 100 : 130, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>}
                 <div className="cb">
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 4 }}>
@@ -1474,8 +1481,345 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
 // ═══════════════════════════════════════════════════════════════
 // BLOCK DETAIL MODAL — visualizar ficha completa do bloco
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// PHOTO LIGHTBOX — fullscreen com zoom, pan, navegação
+// ═══════════════════════════════════════════════════════════════
+function PhotoLightbox({ photos, startIdx = 0, onClose }) {
+  const [idx, setIdx] = useState(startIdx)
+  const [zoom, setZoom] = useState(1)
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const [isDragging, setIsDragging] = useState(false)
+  const dragStartRef = useRef({ x: 0, y: 0, startOffsetX: 0, startOffsetY: 0 })
+  const lastTapRef = useRef(0)
+  const pinchRef = useRef(null)
+
+  useEffect(() => {
+    // Trava o scroll do body
+    const originalOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = originalOverflow }
+  }, [])
+
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === 'Escape') onClose()
+      else if (e.key === 'ArrowLeft') goPrev()
+      else if (e.key === 'ArrowRight') goNext()
+      else if (e.key === '+' || e.key === '=') setZoom(z => Math.min(z + 0.5, 5))
+      else if (e.key === '-' || e.key === '_') setZoom(z => Math.max(z - 0.5, 1))
+      else if (e.key === '0') resetZoom()
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  })
+
+  const resetZoom = () => { setZoom(1); setOffset({ x: 0, y: 0 }) }
+
+  const goPrev = () => {
+    setIdx(i => i === 0 ? photos.length - 1 : i - 1)
+    resetZoom()
+  }
+  const goNext = () => {
+    setIdx(i => i === photos.length - 1 ? 0 : i + 1)
+    resetZoom()
+  }
+
+  // Zoom com scroll do mouse
+  const handleWheel = (e) => {
+    e.preventDefault()
+    const delta = e.deltaY > 0 ? -0.3 : 0.3
+    setZoom(z => Math.max(1, Math.min(5, z + delta)))
+  }
+
+  // Mouse drag para mover quando zoom > 1
+  const handleMouseDown = (e) => {
+    if (zoom <= 1) return
+    e.preventDefault()
+    setIsDragging(true)
+    dragStartRef.current = {
+      x: e.clientX, y: e.clientY,
+      startOffsetX: offset.x, startOffsetY: offset.y,
+    }
+  }
+  const handleMouseMove = (e) => {
+    if (!isDragging) return
+    setOffset({
+      x: dragStartRef.current.startOffsetX + (e.clientX - dragStartRef.current.x),
+      y: dragStartRef.current.startOffsetY + (e.clientY - dragStartRef.current.y),
+    })
+  }
+  const handleMouseUp = () => setIsDragging(false)
+
+  // Touch (pinch + pan + duplo toque)
+  const getDistance = (t1, t2) => {
+    const dx = t1.clientX - t2.clientX
+    const dy = t1.clientY - t2.clientY
+    return Math.hypot(dx, dy)
+  }
+
+  const handleTouchStart = (e) => {
+    if (e.touches.length === 2) {
+      pinchRef.current = {
+        startDist: getDistance(e.touches[0], e.touches[1]),
+        startZoom: zoom,
+      }
+    } else if (e.touches.length === 1) {
+      // Detecta double tap
+      const now = Date.now()
+      if (now - lastTapRef.current < 300) {
+        // Duplo toque
+        if (zoom > 1) resetZoom()
+        else setZoom(2.5)
+      }
+      lastTapRef.current = now
+
+      if (zoom > 1) {
+        setIsDragging(true)
+        dragStartRef.current = {
+          x: e.touches[0].clientX, y: e.touches[0].clientY,
+          startOffsetX: offset.x, startOffsetY: offset.y,
+        }
+      }
+    }
+  }
+
+  const handleTouchMove = (e) => {
+    if (e.touches.length === 2 && pinchRef.current) {
+      const dist = getDistance(e.touches[0], e.touches[1])
+      const newZoom = pinchRef.current.startZoom * (dist / pinchRef.current.startDist)
+      setZoom(Math.max(1, Math.min(5, newZoom)))
+    } else if (e.touches.length === 1 && isDragging && zoom > 1) {
+      setOffset({
+        x: dragStartRef.current.startOffsetX + (e.touches[0].clientX - dragStartRef.current.x),
+        y: dragStartRef.current.startOffsetY + (e.touches[0].clientY - dragStartRef.current.y),
+      })
+    }
+  }
+
+  const handleTouchEnd = () => {
+    pinchRef.current = null
+    setIsDragging(false)
+    if (zoom < 1) resetZoom()
+  }
+
+  // Backdrop click fecha (mas só se clicou no backdrop em si)
+  const handleBackdropClick = (e) => {
+    if (e.target === e.currentTarget) onClose()
+  }
+
+  if (!photos || photos.length === 0) return null
+
+  return (
+    <div
+      onClick={handleBackdropClick}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,.96)', zIndex: 1000,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: zoom > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default',
+      }}>
+
+      {/* Botão fechar */}
+      <button onClick={onClose} title="Fechar (Esc)" style={{
+        position: 'fixed', top: 14, right: 14, zIndex: 10,
+        background: 'rgba(255,255,255,.12)', color: '#fff', border: 'none',
+        width: 44, height: 44, borderRadius: '50%', cursor: 'pointer',
+        fontSize: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        backdropFilter: 'blur(8px)',
+      }}>×</button>
+
+      {/* Contador */}
+      {photos.length > 1 && (
+        <div style={{
+          position: 'fixed', top: 16, left: 16, color: '#fff',
+          background: 'rgba(0,0,0,.5)', padding: '6px 14px', borderRadius: 20,
+          fontSize: 13, fontWeight: 600, zIndex: 10, backdropFilter: 'blur(8px)',
+        }}>
+          {idx + 1} / {photos.length}
+        </div>
+      )}
+
+      {/* Setas navegação */}
+      {photos.length > 1 && (
+        <>
+          <button onClick={(e) => { e.stopPropagation(); goPrev() }} title="Anterior (←)" style={{
+            position: 'fixed', left: 14, top: '50%', transform: 'translateY(-50%)', zIndex: 10,
+            background: 'rgba(255,255,255,.12)', color: '#fff', border: 'none',
+            width: 50, height: 50, borderRadius: '50%', cursor: 'pointer',
+            fontSize: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backdropFilter: 'blur(8px)',
+          }}>‹</button>
+          <button onClick={(e) => { e.stopPropagation(); goNext() }} title="Próxima (→)" style={{
+            position: 'fixed', right: 14, top: '50%', transform: 'translateY(-50%)', zIndex: 10,
+            background: 'rgba(255,255,255,.12)', color: '#fff', border: 'none',
+            width: 50, height: 50, borderRadius: '50%', cursor: 'pointer',
+            fontSize: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backdropFilter: 'blur(8px)',
+          }}>›</button>
+        </>
+      )}
+
+      {/* Controles de zoom (canto inferior) */}
+      <div style={{
+        position: 'fixed', bottom: 16, left: '50%', transform: 'translateX(-50%)',
+        display: 'flex', gap: 8, zIndex: 10, alignItems: 'center',
+        background: 'rgba(0,0,0,.5)', padding: '8px 12px', borderRadius: 30,
+        backdropFilter: 'blur(8px)',
+      }}>
+        <button onClick={(e) => { e.stopPropagation(); setZoom(z => Math.max(1, z - 0.5)) }} title="Diminuir (-)" style={{
+          background: 'rgba(255,255,255,.15)', color: '#fff', border: 'none',
+          width: 34, height: 34, borderRadius: '50%', cursor: 'pointer', fontSize: 18, fontWeight: 700,
+        }}>−</button>
+        <span style={{ color: '#fff', fontSize: 13, fontWeight: 600, minWidth: 48, textAlign: 'center' }}>
+          {Math.round(zoom * 100)}%
+        </span>
+        <button onClick={(e) => { e.stopPropagation(); setZoom(z => Math.min(5, z + 0.5)) }} title="Aumentar (+)" style={{
+          background: 'rgba(255,255,255,.15)', color: '#fff', border: 'none',
+          width: 34, height: 34, borderRadius: '50%', cursor: 'pointer', fontSize: 18, fontWeight: 700,
+        }}>+</button>
+        {zoom > 1 && (
+          <button onClick={(e) => { e.stopPropagation(); resetZoom() }} title="Restaurar (0)" style={{
+            background: 'rgba(255,255,255,.15)', color: '#fff', border: 'none',
+            padding: '6px 12px', borderRadius: 16, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+            marginLeft: 4,
+          }}>Resetar</button>
+        )}
+      </div>
+
+      {/* Imagem */}
+      <img
+        src={photos[idx]}
+        alt=""
+        draggable={false}
+        onClick={(e) => e.stopPropagation()}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        style={{
+          maxWidth: '95vw', maxHeight: '92vh',
+          objectFit: 'contain',
+          transform: `scale(${zoom}) translate(${offset.x / zoom}px, ${offset.y / zoom}px)`,
+          transition: isDragging ? 'none' : 'transform 0.15s ease-out',
+          userSelect: 'none',
+          willChange: 'transform',
+        }}
+      />
+
+      {/* Dica de uso (mostra brevemente) */}
+      {zoom === 1 && (
+        <div style={{
+          position: 'fixed', bottom: 70, left: '50%', transform: 'translateX(-50%)',
+          color: 'rgba(255,255,255,.6)', fontSize: 11, textAlign: 'center', zIndex: 5,
+        }}>
+          Scroll/pinça para zoom · Duplo clique amplia · Arraste para mover
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PHOTO GALLERY — galeria grande com clique para fullscreen
+// ═══════════════════════════════════════════════════════════════
+function PhotoGallery({ photos, height = 420 }) {
+  const [idx, setIdx] = useState(0)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+
+  if (!photos || photos.length === 0) {
+    return (
+      <div style={{ height, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10 }}>
+        <Icon n="cube" s={56} c="var(--mist)" />
+      </div>
+    )
+  }
+
+  const goPrev = (e) => { e.stopPropagation(); setIdx(i => i === 0 ? photos.length - 1 : i - 1) }
+  const goNext = (e) => { e.stopPropagation(); setIdx(i => i === photos.length - 1 ? 0 : i + 1) }
+
+  return (
+    <div>
+      {/* Imagem principal — clique abre fullscreen */}
+      <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#000' }}>
+        <img
+          src={photos[idx]}
+          alt=""
+          onClick={() => setLightboxOpen(true)}
+          style={{ width: '100%', height, objectFit: 'contain', display: 'block', cursor: 'zoom-in' }}
+        />
+
+        {/* Ícone zoom no canto */}
+        <div onClick={() => setLightboxOpen(true)} style={{
+          position: 'absolute', top: 10, right: 10,
+          background: 'rgba(0,0,0,.6)', color: '#fff',
+          padding: '6px 12px', borderRadius: 18, fontSize: 12, fontWeight: 600,
+          cursor: 'pointer', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', gap: 4,
+        }}>
+          🔍 Ampliar
+        </div>
+
+        {/* Contador */}
+        {photos.length > 1 && (
+          <div style={{
+            position: 'absolute', bottom: 10, left: 10,
+            background: 'rgba(0,0,0,.6)', color: '#fff',
+            padding: '4px 12px', borderRadius: 18, fontSize: 12, fontWeight: 600,
+            backdropFilter: 'blur(6px)',
+          }}>
+            📷 {idx + 1} / {photos.length}
+          </div>
+        )}
+
+        {/* Setas navegação dentro da galeria */}
+        {photos.length > 1 && (
+          <>
+            <button onClick={goPrev} title="Anterior" style={{
+              position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
+              background: 'rgba(0,0,0,.55)', color: '#fff', border: 'none',
+              width: 40, height: 40, borderRadius: '50%', cursor: 'pointer', fontSize: 22,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)',
+            }}>‹</button>
+            <button onClick={goNext} title="Próxima" style={{
+              position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+              background: 'rgba(0,0,0,.55)', color: '#fff', border: 'none',
+              width: 40, height: 40, borderRadius: '50%', cursor: 'pointer', fontSize: 22,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)',
+            }}>›</button>
+          </>
+        )}
+      </div>
+
+      {/* Thumbnails */}
+      {photos.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 8, overflowX: 'auto', paddingBottom: 4 }}>
+          {photos.map((url, i) => (
+            <img
+              key={i}
+              src={url}
+              alt=""
+              onClick={() => setIdx(i)}
+              style={{
+                width: 78, height: 78, objectFit: 'cover', borderRadius: 6, cursor: 'pointer',
+                flexShrink: 0, border: '3px solid ' + (i === idx ? 'var(--sap6)' : 'transparent'),
+                opacity: i === idx ? 1 : 0.7, transition: 'opacity 0.15s, border-color 0.15s',
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Lightbox fullscreen */}
+      {lightboxOpen && (
+        <PhotoLightbox photos={photos} startIdx={idx} onClose={() => setLightboxOpen(false)} />
+      )}
+    </div>
+  )
+}
+
 function BlockDetailModal({ block, quarry, onClose }) {
-  const [photoIdx, setPhotoIdx] = useState(0)
   const photos = (block.photos || []).filter(Boolean)
 
   const STATUS_CLR = { produced: '#64748b', available: '#10b981', reserved: '#f59e0b', sold: '#ef4444' }
@@ -1483,7 +1827,7 @@ function BlockDetailModal({ block, quarry, onClose }) {
 
   return (
     <div className="mo" onClick={onClose}>
-      <div className="md" style={{ maxWidth: 800 }} onClick={e => e.stopPropagation()}>
+      <div className="md" style={{ maxWidth: 900 }} onClick={e => e.stopPropagation()}>
         <div className="mhead">
           <div>
             <div className="mtit">{block.code}</div>
@@ -1492,23 +1836,10 @@ function BlockDetailModal({ block, quarry, onClose }) {
           <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
         </div>
         <div className="mbody">
-          {/* Photos carousel */}
-          {photos.length > 0 ? (
-            <div style={{ marginBottom: 16 }}>
-              <img src={photos[photoIdx]} alt="" style={{ width: '100%', maxHeight: 360, objectFit: 'contain', background: 'var(--haze)', borderRadius: 8 }} />
-              {photos.length > 1 && (
-                <div style={{ display: 'flex', gap: 6, marginTop: 8, overflowX: 'auto' }}>
-                  {photos.map((url, i) => (
-                    <img key={i} src={url} alt="" onClick={() => setPhotoIdx(i)} style={{ width: 70, height: 70, objectFit: 'cover', borderRadius: 6, cursor: 'pointer', flexShrink: 0, border: '2px solid ' + (i === photoIdx ? 'var(--sap6)' : 'transparent') }} />
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div style={{ height: 200, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, marginBottom: 16 }}>
-              <Icon n="cube" s={48} c="var(--mist)" />
-            </div>
-          )}
+          {/* Galeria grande com fullscreen + zoom */}
+          <div style={{ marginBottom: 16 }}>
+            <PhotoGallery photos={photos} height={460} />
+          </div>
 
           {/* Status row */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -3028,7 +3359,14 @@ function ClientBoughtBlocksPage({ profile, blocks, quarries, toast }) {
             return (
               <div key={b.id} className="card" style={{ cursor: 'pointer', borderTop: '4px solid #10b981' }} onClick={() => setDetailBlock(b)}>
                 {b.photos && b.photos.length > 0 && b.photos[0]
-                  ? <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 180, objectFit: 'cover', background: 'var(--haze)' }} />
+                  ? <div style={{ position: 'relative' }}>
+                      <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 180, objectFit: 'cover', background: 'var(--haze)', display: 'block' }} />
+                      {b.photos.length > 1 && (
+                        <div style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,.65)', color: '#fff', padding: '3px 9px', borderRadius: 12, fontSize: 11, fontWeight: 600, backdropFilter: 'blur(6px)' }}>
+                          📷 {b.photos.length}
+                        </div>
+                      )}
+                    </div>
                   : <div style={{ height: 150, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>}
                 <div className="cb">
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -3069,7 +3407,6 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
   const [filterMaterial, setFilterMaterial] = useState('')
   const [filterQuarry, setFilterQuarry] = useState('')
   const [saving, setSaving] = useState(false)
-  const [photoIdx, setPhotoIdx] = useState(0)
   const [selectedIds, setSelectedIds] = useState([])
   const [multiBuy, setMultiBuy] = useState(false)
   const [multiBuyMessage, setMultiBuyMessage] = useState('')
@@ -3114,7 +3451,6 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
 
   const openDetail = (b) => {
     setSelected(b)
-    setPhotoIdx(0)
     setShowConfirm(false)
     setBuyMessage('')
   }
@@ -3238,7 +3574,14 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
                   {isFav ? '⭐' : '☆'}
                 </button>
                 {b.photos && b.photos.length > 0 && b.photos[0] ? (
-                  <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 200, objectFit: 'cover', background: 'var(--haze)' }} />
+                  <div style={{ position: 'relative' }}>
+                    <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 200, objectFit: 'cover', background: 'var(--haze)', display: 'block' }} />
+                    {b.photos.length > 1 && (
+                      <div style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,.65)', color: '#fff', padding: '3px 9px', borderRadius: 12, fontSize: 11, fontWeight: 600, backdropFilter: 'blur(6px)' }}>
+                        📷 {b.photos.length}
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <div style={{ height: 200, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <Icon n="cube" s={40} c="var(--mist)" />
@@ -3350,22 +3693,9 @@ function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast })
                 <button className="btn bo bsm" onClick={closeDetail}><Icon n="x" s={14} /></button>
               </div>
               <div className="mbody">
-                {photos.length > 0 ? (
-                  <div style={{ marginBottom: 16 }}>
-                    <img src={photos[photoIdx]} alt="" style={{ width: '100%', maxHeight: 360, objectFit: 'contain', background: 'var(--haze)', borderRadius: 8 }} />
-                    {photos.length > 1 && (
-                      <div style={{ display: 'flex', gap: 6, marginTop: 8, overflowX: 'auto' }}>
-                        {photos.map((url, i) => (
-                          <img key={i} src={url} alt="" onClick={() => setPhotoIdx(i)} style={{ width: 70, height: 70, objectFit: 'cover', borderRadius: 6, cursor: 'pointer', flexShrink: 0, border: '2px solid ' + (i === photoIdx ? 'var(--sap6)' : 'transparent') }} />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{ height: 200, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, marginBottom: 16 }}>
-                    <Icon n="cube" s={48} c="var(--mist)" />
-                  </div>
-                )}
+                <div style={{ marginBottom: 16 }}>
+                  <PhotoGallery photos={photos} height={460} />
+                </div>
 
                 <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                   <span className="bdg" style={{ background: STATUS_CLR[selected.status] + '20', color: STATUS_CLR[selected.status], padding: '6px 12px', fontSize: 13 }}>
@@ -3705,7 +4035,14 @@ function SoldBlocksPage({ profile, blocks, quarries, sales, onChange, toast }) {
             return (
               <div key={b.id} className="card" style={{ position: 'relative', borderTop: '4px solid #ef4444', cursor: 'pointer' }} onClick={() => setDetailBlock(b)}>
                 {b.photos && b.photos.length > 0 && b.photos[0]
-                  ? <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 160, objectFit: 'cover', background: 'var(--haze)', filter: 'grayscale(20%)' }} />
+                  ? <div style={{ position: 'relative' }}>
+                      <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 160, objectFit: 'cover', background: 'var(--haze)', filter: 'grayscale(20%)', display: 'block' }} />
+                      {b.photos.length > 1 && (
+                        <div style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,.65)', color: '#fff', padding: '3px 9px', borderRadius: 12, fontSize: 11, fontWeight: 600, backdropFilter: 'blur(6px)' }}>
+                          📷 {b.photos.length}
+                        </div>
+                      )}
+                    </div>
                   : <div style={{ height: 130, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>}
                 <div className="cb">
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -3837,7 +4174,14 @@ function ReserveCommercialPage({ profile, blocks, quarries, clients, payments, o
                 <button onClick={() => setDetailBlock(b)} title="Ver detalhes" style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, width: 28, height: 28, background: 'rgba(255,255,255,.95)', border: '1px solid var(--fog)', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🔍</button>
 
                 {b.photos && b.photos.length > 0 && b.photos[0]
-                  ? <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 160, objectFit: 'cover', background: 'var(--haze)', cursor: 'pointer' }} onClick={() => setDetailBlock(b)} />
+                  ? <div style={{ position: 'relative' }}>
+                      <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 160, objectFit: 'cover', background: 'var(--haze)', cursor: 'pointer', display: 'block' }} onClick={() => setDetailBlock(b)} />
+                      {b.photos.length > 1 && (
+                        <div style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,.65)', color: '#fff', padding: '3px 9px', borderRadius: 12, fontSize: 11, fontWeight: 600, backdropFilter: 'blur(6px)', pointerEvents: 'none' }}>
+                          📷 {b.photos.length}
+                        </div>
+                      )}
+                    </div>
                   : <div style={{ height: 130, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>}
                 <div className="cb">
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
