@@ -1018,7 +1018,7 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
     code: '', quarry_id: '', material: '', classification: 'A',
     gross_l: '', gross_h: '', gross_w: '',
     net_l: '', net_h: '', net_w: '',
-    currency: 'BRL', price_m3: '',
+    currency: 'USD', price_m3: '',
     notes: '', photos: [],
     prod_date: new Date().toISOString().slice(0, 10),
   }
@@ -1172,7 +1172,7 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
   const selectedBlocks = blocks.filter(b => selectedIds.includes(b.id))
 
   // Owner pode tudo, foreman cadastra/edita, seller só vende
-  const canEdit = profile.role === 'owner' || profile.role === 'foreman'
+  const canEdit = profile.role === 'owner' || profile.role === 'foreman' || profile.role === 'seller'
   const canSell = profile.role === 'owner' || profile.role === 'seller'
   const canReserve = profile.role === 'owner' || profile.role === 'seller'
 
@@ -1369,7 +1369,7 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
             <div className="mhead"><div className="mtit">{editId ? 'Editar' : 'Novo'} Bloco</div><button className="btn bo bsm" onClick={() => setShowForm(false)}><Icon n="x" s={14} /></button></div>
             <div className="mbody">
               <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className="fg"><label className="fl">Código *</label><input className="fc" value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} placeholder="Ex: VMC-001" /></div>
+                <div className="fg"><label className="fl">Código *</label><input className="fc" value={form.code} onChange={e => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="Ex: VMC-001" autoCapitalize="characters" style={{ textTransform: 'uppercase' }} /></div>
                 <div className="fg"><label className="fl">Pedreira *</label>
                   <select className="fc" value={form.quarry_id} onChange={e => setForm({ ...form, quarry_id: e.target.value, material: '' })}>
                     <option value="">Selecione...</option>
@@ -1427,7 +1427,7 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
               <div className="responsive-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}>
                 <div className="fg"><label className="fl">Moeda</label>
                   <select className="fc" value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}>
-                    <option value="BRL">BRL (R$)</option><option value="USD">USD (US$)</option>
+                    <option value="USD">USD (US$)</option><option value="BRL">BRL (R$)</option>
                   </select>
                 </div>
                 <div className="fg"><label className="fl">Preço por m³ *</label>
