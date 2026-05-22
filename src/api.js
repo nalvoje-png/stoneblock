@@ -323,11 +323,24 @@ export async function deleteBlock(id) {
 
 // Reservar bloco para cliente
 export async function reserveBlock(blockId, clientId) {
+  // Atualiza status do bloco
   const { error } = await supabase
     .from('blocks')
     .update({ status: 'reserved', reserved_for: clientId })
     .eq('id', blockId)
   if (error) throw error
+
+  // Remove o bloco do catálogo dos OUTROS clientes (mantém apenas o cliente da reserva, se houver)
+  try {
+    const { error: delErr } = await supabase
+      .from('block_releases')
+      .delete()
+      .eq('block_id', blockId)
+      .neq('client_id', clientId)
+    if (delErr) console.warn('Não foi possível remover releases:', delErr)
+  } catch (e) {
+    console.warn('Erro ao limpar releases:', e)
+  }
 }
 
 // Liberar reserva
@@ -967,4 +980,52 @@ export async function toggleFavorite(profile, blockId) {
     await supabase.from('favorites').insert({ client_id: clientRec.id, block_id: blockId })
     return true
   }
+}
+
+// ─── COMPRAS DO CLIENTE (vendas em que ele é o cliente) ─────────
+export async function listClientSales(profile) {
+  const clientRec = await getClientByUser(profile.id)
+  if (!clientRec) return []
+
+  const { data, error } = await supabase
+    .from('sales')
+    .select(`
+      *,
+      seller:profiles!seller_id(id, name, avatar),
+      client:clients!client_id(id, name, country),
+      payment_method:payment_methods!payment_method_id(id, name),
+      sale_blocks(block_id, block:blocks(id, code, material, net_volume, total_value, currency, photos, classification, quarry_id, prod_date, gross_volume, gross_l, gross_h, gross_w, net_l, net_h, net_w, price_m3, notes, sys_code, status))
+    `)
+    .eq('client_id', clientRec.id)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+
+  return (data || []).map(s => ({
+    ...s,
+    block_ids: (s.sale_blocks || []).map(sb => sb.block_id),
+    blocks: (s.sale_blocks || []).map(sb => sb.block).filter(Boolean).map(b => ({
+      ...b,
+      photos: Array.isArray(b.photos) ? b.photos
+            : typeof b.photos === 'string' ? (b.photos.startsWith('[') ? JSON.parse(b.photos) : [b.photos])
+            : []
+    })),
+  }))
+}
+
+// Lista blocos comprados pelo cliente (achatado, com info da venda em cada bloco)
+export async function listClientBoughtBlocks(profile) {
+  const sales = await listClientSales(profile)
+  const result = []
+  sales.forEach(s => {
+    (s.blocks || []).forEach(b => {
+      result.push({
+        ...b,
+        sale_id: s.id,
+        sale_date: s.created_at,
+        sale_obs: s.obs,
+        payment_method_name: s.payment_method?.name || null,
+      })
+    })
+  })
+  return result
 }

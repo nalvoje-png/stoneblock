@@ -1344,6 +1344,9 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
                   <option value="">Selecione o cliente...</option>
                   {clients.map(c => <option key={c.id} value={c.id}>{c.name} ({c.country})</option>)}
                 </select>
+                <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 6, lineHeight: 1.5 }}>
+                  ⚠️ Se o bloco estiver liberado no catálogo de outros clientes, ele será removido automaticamente.
+                </div>
               </div>
             </div>
             <div className="mfoot">
@@ -2690,6 +2693,374 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
 // ═══════════════════════════════════════════════════════════════
 // CLIENT CATALOG — visão do cliente, vê blocos liberados para ele
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// CLIENT PURCHASES PAGE — histórico de compras do cliente
+// ═══════════════════════════════════════════════════════════════
+function ClientPurchasesPage({ profile, sales, onChange, toast }) {
+  const [detailSale, setDetailSale] = useState(null)
+  const [filterPeriod, setFilterPeriod] = useState('all')
+  const [filterMaterial, setFilterMaterial] = useState('')
+  const [dtInicio, setDtInicio] = useState('')
+  const [dtFim, setDtFim] = useState('')
+
+  // Materiais únicos das compras
+  const allMaterials = [...new Set(
+    sales.flatMap(s => (s.blocks || []).map(b => b.material).filter(Boolean))
+  )].sort()
+
+  const filtered = sales.filter(s => {
+    if (filterPeriod !== 'all' && filterPeriod !== 'custom') {
+      const d = new Date(s.created_at)
+      const now = new Date()
+      if (filterPeriod === 'month') {
+        if (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false
+      } else if (filterPeriod === 'last_month') {
+        const last = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        if (d.getMonth() !== last.getMonth() || d.getFullYear() !== last.getFullYear()) return false
+      } else if (filterPeriod === 'year') {
+        if (d.getFullYear() !== now.getFullYear()) return false
+      }
+    }
+    if (filterPeriod === 'custom') {
+      const d = new Date(s.created_at)
+      if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
+      if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+    }
+    if (filterMaterial) {
+      const has = (s.blocks || []).some(b => b.material === filterMaterial)
+      if (!has) return false
+    }
+    return true
+  })
+
+  const totalBRL = filtered.reduce((a, s) => a + (Number(s.total_brl) || 0), 0)
+  const totalUSD = filtered.reduce((a, s) => a + (Number(s.total_usd) || 0), 0)
+  const totalBlocks = filtered.reduce((a, s) => a + (s.blocks?.length || 0), 0)
+
+  const hasFilter = filterPeriod !== 'all' || filterMaterial
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">🛒 Minhas Compras</div>
+        <div className="psub">{filtered.length} compra(s) · {totalBlocks} bloco(s) {hasFilter ? `(de ${sales.length} compras totais)` : ''}</div>
+      </div>
+
+      {filtered.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12, marginBottom: 16 }}>
+          {totalBRL > 0 && (
+            <div className="card" style={{ background: 'linear-gradient(135deg,#0c1a2e,#1e3a8a)', border: 'none' }}>
+              <div className="cb">
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Total Comprado R$</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 26, color: '#fff' }}>{money(totalBRL, 'BRL')}</div>
+              </div>
+            </div>
+          )}
+          {totalUSD > 0 && (
+            <div className="card" style={{ background: 'linear-gradient(135deg,#10b981,#059669)', border: 'none' }}>
+              <div className="cb">
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Total Comprado US$</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 26, color: '#fff' }}>{money(totalUSD, 'USD')}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Filtros */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="cb" style={{ padding: '12px 14px' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Filtros:</span>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
+              <option value="all">Todos os períodos</option>
+              <option value="month">Mês atual</option>
+              <option value="last_month">Mês anterior</option>
+              <option value="year">Ano atual</option>
+              <option value="custom">Período personalizado</option>
+            </select>
+            {filterPeriod === 'custom' && (
+              <>
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} onChange={e => setDtInicio(e.target.value)} />
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} onChange={e => setDtFim(e.target.value)} />
+              </>
+            )}
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+              <option value="">Todos os materiais</option>
+              {allMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            {hasFilter && (
+              <button className="btn bo bsm" onClick={() => { setFilterPeriod('all'); setFilterMaterial(''); setDtInicio(''); setDtFim('') }}>
+                <Icon n="x" s={13} /> Limpar
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cart" s={48} /></div>
+          <div className="estit">{hasFilter ? 'Nenhuma compra encontrada com esses filtros' : 'Você ainda não fez compras'}</div>
+        </div>
+      ) : (
+        <div className="card"><div className="tw"><table>
+          <thead><tr>
+            <th>Data</th>
+            <th>Blocos</th>
+            <th>Total R$</th>
+            <th>Total US$</th>
+          </tr></thead>
+          <tbody>
+            {filtered.map(s => (
+              <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => setDetailSale(s)}>
+                <td style={{ fontSize: 13, color: 'var(--mist)' }}>{fmtDate(s.created_at)}</td>
+                <td>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {(s.blocks || []).map(b => (
+                      <span key={b.id} style={{ fontSize: 12 }}>
+                        <strong style={{ color: 'var(--sap7)' }}>{b.code}</strong>
+                        <span style={{ color: 'var(--mist)', marginLeft: 4 }}>· {b.material}</span>
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td style={{ fontWeight: 700, color: '#059669' }}>{s.total_brl > 0 ? money(s.total_brl, 'BRL') : '—'}</td>
+                <td style={{ fontWeight: 700, color: 'var(--sap7)' }}>{s.total_usd > 0 ? money(s.total_usd, 'USD') : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div></div>
+      )}
+
+      {/* Modal de detalhe (reutiliza visual do SalesPage) */}
+      {detailSale && (
+        <div className="mo" onClick={() => setDetailSale(null)}>
+          <div className="md" style={{ maxWidth: 680 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div>
+                <div className="mtit">Detalhes da Compra</div>
+                <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>{fmtDate(detailSale.created_at)}</div>
+              </div>
+              <button className="btn bo bsm" onClick={() => setDetailSale(null)}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 10, marginBottom: 16 }}>
+                {detailSale.seller && (
+                  <div className="sc" style={{ padding: 12, borderTopColor: 'var(--sap5)' }}>
+                    <div className="slbl2">Vendedor</div>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14 }}>{detailSale.seller?.name || '—'}</div>
+                  </div>
+                )}
+                {detailSale.payment_method && (
+                  <div className="sc" style={{ padding: 12, borderTopColor: 'var(--ok)' }}>
+                    <div className="slbl2">Pagamento</div>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14 }}>{detailSale.payment_method.name}</div>
+                  </div>
+                )}
+                {detailSale.dollar_rate && (
+                  <div className="sc" style={{ padding: 12, borderTopColor: 'var(--warn)' }}>
+                    <div className="slbl2">Cotação USD</div>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14 }}>R$ {Number(detailSale.dollar_rate).toFixed(4)}</div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 8 }}>
+                  Blocos comprados ({(detailSale.blocks || []).length})
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {(detailSale.blocks || []).map(b => (
+                    <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 10, background: 'var(--haze)', borderRadius: 8 }}>
+                      {b.photos && b.photos[0] ? (
+                        <img src={b.photos[0]} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6 }} />
+                      ) : (
+                        <div style={{ width: 60, height: 60, background: '#fff', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon n="cube" s={24} c="var(--mist)" />
+                        </div>
+                      )}
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, color: 'var(--sap7)' }}>{b.code}</div>
+                        <div style={{ fontSize: 12, color: 'var(--mist)' }}>{b.material} · Classif. {b.classification} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                      </div>
+                      <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, color: 'var(--sap7)' }}>
+                        {money(b.total_value, b.currency)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--sap1)', padding: 16, borderRadius: 10, marginBottom: 14 }}>
+                {detailSale.total_brl > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
+                    <span>Total R$:</span>
+                    <strong style={{ fontFamily: 'Sora,sans-serif', fontSize: 18 }}>{money(detailSale.total_brl, 'BRL')}</strong>
+                  </div>
+                )}
+                {detailSale.total_usd > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                    <span>Total US$:</span>
+                    <strong style={{ fontFamily: 'Sora,sans-serif', fontSize: 18 }}>{money(detailSale.total_usd, 'USD')}</strong>
+                  </div>
+                )}
+              </div>
+
+              {detailSale.obs && (
+                <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8, fontSize: 13 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 4 }}>Observações</div>
+                  {detailSale.obs}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CLIENT BOUGHT BLOCKS PAGE — blocos comprados pelo cliente
+// ═══════════════════════════════════════════════════════════════
+function ClientBoughtBlocksPage({ profile, blocks, quarries, toast }) {
+  const [detailBlock, setDetailBlock] = useState(null)
+  const [filterMaterial, setFilterMaterial] = useState('')
+  const [filterPeriod, setFilterPeriod] = useState('all')
+  const [dtInicio, setDtInicio] = useState('')
+  const [dtFim, setDtFim] = useState('')
+
+  // 'blocks' aqui são os boughtBlocks (com sale_date)
+  const allMaterials = [...new Set(blocks.map(b => b.material).filter(Boolean))].sort()
+
+  const filtered = blocks.filter(b => {
+    if (filterMaterial && b.material !== filterMaterial) return false
+    if (filterPeriod !== 'all' && filterPeriod !== 'custom' && b.sale_date) {
+      const d = new Date(b.sale_date)
+      const now = new Date()
+      if (filterPeriod === 'month') {
+        if (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false
+      } else if (filterPeriod === 'last_month') {
+        const last = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        if (d.getMonth() !== last.getMonth() || d.getFullYear() !== last.getFullYear()) return false
+      } else if (filterPeriod === 'year') {
+        if (d.getFullYear() !== now.getFullYear()) return false
+      }
+    }
+    if (filterPeriod === 'custom' && b.sale_date) {
+      const d = new Date(b.sale_date)
+      if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
+      if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+    }
+    return true
+  })
+
+  const totalBRL = filtered.filter(b => !b.currency || b.currency === 'BRL').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+  const totalUSD = filtered.filter(b => b.currency === 'USD').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+  const totalM3 = filtered.reduce((a, b) => a + (Number(b.net_volume) || 0), 0)
+
+  const hasFilter = filterMaterial || filterPeriod !== 'all'
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">📦 Meus Blocos</div>
+        <div className="psub">{filtered.length} bloco(s) · {totalM3.toFixed(2)} m³ {hasFilter ? `(de ${blocks.length} total)` : ''}</div>
+      </div>
+
+      {filtered.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12, marginBottom: 16 }}>
+          {totalBRL > 0 && (
+            <div className="card" style={{ background: 'linear-gradient(135deg,#0c1a2e,#1e3a8a)', border: 'none' }}>
+              <div className="cb">
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Valor em R$</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 24, color: '#fff' }}>{money(totalBRL, 'BRL')}</div>
+              </div>
+            </div>
+          )}
+          {totalUSD > 0 && (
+            <div className="card" style={{ background: 'linear-gradient(135deg,#10b981,#059669)', border: 'none' }}>
+              <div className="cb">
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Valor em US$</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 24, color: '#fff' }}>{money(totalUSD, 'USD')}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Filtros */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
+          <option value="all">Todos os períodos</option>
+          <option value="month">Mês atual</option>
+          <option value="last_month">Mês anterior</option>
+          <option value="year">Ano atual</option>
+          <option value="custom">Personalizado</option>
+        </select>
+        {filterPeriod === 'custom' && (
+          <>
+            <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} onChange={e => setDtInicio(e.target.value)} />
+            <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} onChange={e => setDtFim(e.target.value)} />
+          </>
+        )}
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+          <option value="">Todos os materiais</option>
+          {allMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        {hasFilter && (
+          <button className="btn bo bsm" onClick={() => { setFilterMaterial(''); setFilterPeriod('all'); setDtInicio(''); setDtFim('') }}>
+            <Icon n="x" s={13} /> Limpar
+          </button>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
+          <div className="estit">{hasFilter ? 'Nenhum bloco encontrado com esses filtros' : 'Você ainda não comprou blocos'}</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
+          {filtered.map(b => {
+            const q = (quarries || []).find(x => x.id === b.quarry_id)
+            return (
+              <div key={b.id} className="card" style={{ cursor: 'pointer', borderTop: '4px solid #10b981' }} onClick={() => setDetailBlock(b)}>
+                {b.photos && b.photos.length > 0 && b.photos[0]
+                  ? <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 180, objectFit: 'cover', background: 'var(--haze)' }} />
+                  : <div style={{ height: 150, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>}
+                <div className="cb">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15 }}>{b.code}</div>
+                    <span className="bdg" style={{ background: '#dcfce7', color: '#15803d' }}>✓ Meu</span>
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{b.material}</div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 4 }}>Classif. {b.classification} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                  {b.sale_date && (
+                    <div style={{ fontSize: 11, color: '#15803d', marginBottom: 6, background: '#f0fdf4', padding: '3px 6px', borderRadius: 4 }}>
+                      Comprado em {fmtDate(b.sale_date)}
+                    </div>
+                  )}
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, color: 'var(--sap7)' }}>{money(b.total_value, b.currency)}</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {detailBlock && (
+        <BlockDetailModal
+          block={detailBlock}
+          quarry={(quarries || []).find(q => q.id === detailBlock.quarry_id)}
+          onClose={() => setDetailBlock(null)}
+        />
+      )}
+    </div>
+  )
+}
+
 function CatalogPage({ profile, catalog, favorites, quarries, onChange, toast }) {
   const [selected, setSelected] = useState(null)
   const [showConfirm, setShowConfirm] = useState(false)
@@ -4146,15 +4517,19 @@ export default function App() {
     try {
       // If client, load catalog; otherwise load full team data
       if (p.role === 'client') {
-        const [cat, ord, notif, favs] = await Promise.all([
+        const [cat, ord, notif, favs, clSales, clBoughtBlocks] = await Promise.all([
           api.listClientCatalog(p),
           api.listOrders(p),
           api.listNotifications(p),
           api.listClientFavorites(p),
+          api.listClientSales(p),
+          api.listClientBoughtBlocks(p),
         ])
         setCatalog(cat); setOrders(ord); setNotifications(notif); setFavorites(favs)
+        setSales(clSales)        // reusa o state de sales para as compras do cliente
+        setBlocks(clBoughtBlocks) // reusa o state de blocks para os blocos comprados
         // Empty arrays for unused data
-        setQuarries([]); setClients([]); setPayments([]); setBlocks([]); setSales([]); setTeam([]); setReleases([])
+        setQuarries([]); setClients([]); setPayments([]); setTeam([]); setReleases([])
       } else {
         const [q, c, pm, b, s, t, r, ord, notif] = await Promise.all([
           api.listQuarries(p),
@@ -4315,7 +4690,9 @@ export default function App() {
     ]
   } else if (profile.role === 'client') {
     NAV = [
-      { p: 'catalog', l: 'Catálogo',         i: 'cube' },
+      { p: 'catalog',           l: 'Catálogo',         i: 'cube' },
+      { p: 'client_purchases',  l: 'Minhas Compras',   i: 'cart' },
+      { p: 'client_blocks',     l: 'Meus Blocos',      i: 'check' },
     ]
   }
 
@@ -4333,6 +4710,8 @@ export default function App() {
       case 'clients':     return <ClientsPage profile={profile} clients={clients} onChange={() => loadData(profile)} toast={showToast} />
       case 'payments':    return <PaymentsPage profile={profile} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
       case 'catalog':     return <CatalogPage profile={profile} catalog={catalog} favorites={favorites} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
+      case 'client_purchases': return <ClientPurchasesPage profile={profile} sales={sales} onChange={() => loadData(profile)} toast={showToast} />
+      case 'client_blocks':    return <ClientBoughtBlocksPage profile={profile} blocks={blocks} quarries={quarries} toast={showToast} />
       default:
         if (profile.role === 'client') return <CatalogPage profile={profile} catalog={catalog} favorites={favorites} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
         if (profile.role === 'foreman') return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
