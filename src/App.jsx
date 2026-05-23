@@ -239,7 +239,7 @@ function LoginPage({ onLoginSuccess }) {
 function Dashboard({ blocks, quarries, clients, sales }) {
   const [filterQuarry, setFilterQuarry] = useState('')
   const [filterMaterial, setFilterMaterial] = useState('')
-  const [filterPeriod, setFilterPeriod] = useState('all')
+  const [filterPeriod, setFilterPeriod] = useState('month')
   const [dtInicio, setDtInicio] = useState('')
   const [dtFim, setDtFim] = useState('')
 
@@ -2299,11 +2299,13 @@ ${dollarRate > 0 ? `
 // SALES HISTORY PAGE
 // ═══════════════════════════════════════════════════════════════
 function SalesPage({ profile, sales, blocks, quarries, onChange, toast }) {
+  const [filterPeriod, setFilterPeriod] = useState('month')
   const [dtInicio, setDtInicio] = useState('')
   const [dtFim, setDtFim] = useState('')
   const [filterClient, setFilterClient] = useState('')
   const [filterQuarry, setFilterQuarry] = useState('')
   const [filterMaterial, setFilterMaterial] = useState('')
+  const [filterBlock, setFilterBlock] = useState('')
   const [detailSale, setDetailSale] = useState(null)
   const [detailBlock, setDetailBlock] = useState(null)
 
@@ -2317,8 +2319,21 @@ function SalesPage({ profile, sales, blocks, quarries, onChange, toast }) {
   // Filtered sales
   const filtered = sales.filter(s => {
     const d = new Date(s.created_at)
-    if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
-    if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+    if (filterPeriod !== 'all' && filterPeriod !== 'custom') {
+      const now = new Date()
+      if (filterPeriod === 'month') {
+        if (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false
+      } else if (filterPeriod === 'last_month') {
+        const last = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        if (d.getMonth() !== last.getMonth() || d.getFullYear() !== last.getFullYear()) return false
+      } else if (filterPeriod === 'year') {
+        if (d.getFullYear() !== now.getFullYear()) return false
+      }
+    }
+    if (filterPeriod === 'custom') {
+      if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
+      if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+    }
     if (filterClient && s.client?.name?.toLowerCase().indexOf(filterClient.toLowerCase()) === -1) return false
     if (filterQuarry) {
       const hasFromQuarry = (s.blocks || []).some(b => b.quarry_id === filterQuarry)
@@ -2327,6 +2342,11 @@ function SalesPage({ profile, sales, blocks, quarries, onChange, toast }) {
     if (filterMaterial) {
       const hasMaterial = (s.blocks || []).some(b => b.material === filterMaterial)
       if (!hasMaterial) return false
+    }
+    if (filterBlock) {
+      const q = filterBlock.toLowerCase()
+      const hasBlock = (s.blocks || []).some(b => (b.code || '').toLowerCase().includes(q))
+      if (!hasBlock) return false
     }
     return true
   })
@@ -2375,26 +2395,32 @@ function SalesPage({ profile, sales, blocks, quarries, onChange, toast }) {
       {/* Filters */}
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="cb" style={{ padding: '14px 18px' }}>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <label className="fl" style={{ margin: 0 }}>De</label>
-              <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} max={dtFim || today} onChange={e => setDtInicio(e.target.value)} />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <label className="fl" style={{ margin: 0 }}>Até</label>
-              <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} min={dtInicio} max={today} onChange={e => setDtFim(e.target.value)} />
-            </div>
-            <input className="fc" style={{ fontSize: 13, padding: '7px 12px', flex: '1 1 180px' }} placeholder="Buscar cliente..." value={filterClient} onChange={e => setFilterClient(e.target.value)} />
-            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
+              <option value="month">Mês atual</option>
+              <option value="last_month">Mês anterior</option>
+              <option value="year">Ano atual</option>
+              <option value="all">Todos os períodos</option>
+              <option value="custom">Período personalizado</option>
+            </select>
+            {filterPeriod === 'custom' && (
+              <>
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} max={dtFim || today} onChange={e => setDtInicio(e.target.value)} placeholder="De" />
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} min={dtInicio} max={today} onChange={e => setDtFim(e.target.value)} placeholder="Até" />
+              </>
+            )}
+            <input className="fc" style={{ fontSize: 13, padding: '7px 12px', flex: '1 1 150px', minWidth: 150 }} placeholder="Buscar cliente..." value={filterClient} onChange={e => setFilterClient(e.target.value)} />
+            <input className="fc" style={{ fontSize: 13, padding: '7px 12px', flex: '0 1 150px', minWidth: 130, textTransform: 'uppercase' }} placeholder="Nº do bloco..." value={filterBlock} onChange={e => setFilterBlock(e.target.value.toUpperCase())} />
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
               <option value="">Todas as pedreiras</option>
               {(quarries || []).map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
             </select>
-            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
               <option value="">Todos os materiais</option>
               {salesMaterials.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
-            {(dtInicio || dtFim || filterClient || filterQuarry || filterMaterial) && (
-              <button className="btn bo bsm" onClick={() => { setDtInicio(''); setDtFim(''); setFilterClient(''); setFilterQuarry(''); setFilterMaterial('') }}>
+            {(filterPeriod !== 'month' || dtInicio || dtFim || filterClient || filterBlock || filterQuarry || filterMaterial) && (
+              <button className="btn bo bsm" onClick={() => { setFilterPeriod('month'); setDtInicio(''); setDtFim(''); setFilterClient(''); setFilterBlock(''); setFilterQuarry(''); setFilterMaterial('') }}>
                 <Icon n="x" s={13} /> Limpar
               </button>
             )}
@@ -2795,8 +2821,19 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
   const [showReleaseFlow, setShowReleaseFlow] = useState(false)
   const [saving, setSaving] = useState(false)
   const [detailBlock, setDetailBlock] = useState(null)
+  const [filterClient, setFilterClient] = useState('')
+  const [filterMaterial, setFilterMaterial] = useState('')
+  const [filterQuarry, setFilterQuarry] = useState('')
 
   const availableBlocks = blocks.filter(b => b.status === 'available' || b.status === 'reserved' || b.status === 'reserve')
+
+  // Materiais únicos dos blocos liberados
+  const releasedMaterials = [...new Set(
+    releases.map(r => {
+      const b = blocks.find(x => x.id === r.block_id)
+      return b?.material
+    }).filter(Boolean)
+  )].sort()
 
   // Map of block_id => Set of client_ids that already have access
   const releaseMap = {}
@@ -2852,17 +2889,56 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
           <div className="estit">Nenhum bloco liberado para clientes</div>
           <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>Clique em "Nova Liberação" para começar.</div>
         </div>
-      ) : (
-        <div className="card"><div className="tw"><table>
-          <thead><tr>
-            <th></th><th>Bloco</th><th>Cliente</th><th>Liberado por</th><th>Data</th><th></th>
-          </tr></thead>
-          <tbody>
-            {releases.map(r => {
-              const b = blocks.find(x => x.id === r.block_id)
-              const photo = b?.photos && b.photos[0]
-              return (
-                <tr key={r.id} style={{ cursor: b ? 'pointer' : 'default' }} onClick={() => b && setDetailBlock(b)}>
+      ) : (() => {
+        // Aplica filtros
+        const filteredReleases = releases.filter(r => {
+          const b = blocks.find(x => x.id === r.block_id)
+          if (filterClient && r.client_id !== filterClient) return false
+          if (filterMaterial && b?.material !== filterMaterial) return false
+          if (filterQuarry && b?.quarry_id !== filterQuarry) return false
+          return true
+        })
+        const hasFilter = filterClient || filterMaterial || filterQuarry
+        return (
+          <>
+            <div className="card" style={{ marginBottom: 12 }}>
+              <div className="cb" style={{ padding: '12px 14px' }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Filtros:</span>
+                  <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterClient} onChange={e => setFilterClient(e.target.value)}>
+                    <option value="">Todos os clientes</option>
+                    {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+                    <option value="">Todas as pedreiras</option>
+                    {(quarries || []).map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+                  </select>
+                  <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+                    <option value="">Todos os materiais</option>
+                    {releasedMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  {hasFilter && (
+                    <button className="btn bo bsm" onClick={() => { setFilterClient(''); setFilterMaterial(''); setFilterQuarry('') }}>
+                      <Icon n="x" s={13} /> Limpar
+                    </button>
+                  )}
+                  <span style={{ fontSize: 12, color: 'var(--mist)', marginLeft: 'auto' }}>
+                    {filteredReleases.length} de {releases.length} liberações
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="card"><div className="tw"><table>
+              <thead><tr>
+                <th></th><th>Bloco</th><th>Cliente</th><th>Liberado por</th><th>Data</th><th></th>
+              </tr></thead>
+              <tbody>
+                {filteredReleases.map(r => {
+                  const b = blocks.find(x => x.id === r.block_id)
+                  const photo = b?.photos && b.photos[0]
+                  return (
+                    <tr key={r.id} style={{ cursor: b ? 'pointer' : 'default' }} onClick={() => b && setDetailBlock(b)}>
                   <td style={{ width: 56 }}>
                     {photo ? (
                       <img src={photo} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 5 }} />
@@ -2889,7 +2965,9 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
             })}
           </tbody>
         </table></div></div>
-      )}
+          </>
+        )
+      })()}
 
       {/* Block detail modal */}
       {detailBlock && (
@@ -3029,7 +3107,8 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
 // ═══════════════════════════════════════════════════════════════
 function ClientPurchasesPage({ profile, sales, onChange, toast }) {
   const [detailSale, setDetailSale] = useState(null)
-  const [filterPeriod, setFilterPeriod] = useState('all')
+  const [detailBlock, setDetailBlock] = useState(null)
+  const [filterPeriod, setFilterPeriod] = useState('month')
   const [filterMaterial, setFilterMaterial] = useState('')
   const [dtInicio, setDtInicio] = useState('')
   const [dtFim, setDtFim] = useState('')
@@ -3203,7 +3282,9 @@ function ClientPurchasesPage({ profile, sales, onChange, toast }) {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {(detailSale.blocks || []).map(b => (
-                    <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 10, background: 'var(--haze)', borderRadius: 8 }}>
+                    <div key={b.id} onClick={() => setDetailBlock(b)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 10, background: 'var(--haze)', borderRadius: 8, cursor: 'pointer', transition: 'background .15s' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--sap1)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'var(--haze)'}>
                       {b.photos && b.photos[0] ? (
                         <img src={b.photos[0]} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6 }} />
                       ) : (
@@ -3214,6 +3295,7 @@ function ClientPurchasesPage({ profile, sales, onChange, toast }) {
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 700, color: 'var(--sap7)' }}>{b.code}</div>
                         <div style={{ fontSize: 12, color: 'var(--mist)' }}>{b.material} · Classif. {b.classification} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                        <div style={{ fontSize: 11, color: 'var(--sap6)', marginTop: 2 }}>👁 Clique para ver fotos e detalhes</div>
                       </div>
                       <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, color: 'var(--sap7)' }}>
                         {money(b.total_value, b.currency)}
@@ -3248,6 +3330,14 @@ function ClientPurchasesPage({ profile, sales, onChange, toast }) {
           </div>
         </div>
       )}
+
+      {detailBlock && (
+        <BlockDetailModal
+          block={detailBlock}
+          quarry={null}
+          onClose={() => setDetailBlock(null)}
+        />
+      )}
     </div>
   )
 }
@@ -3258,7 +3348,7 @@ function ClientPurchasesPage({ profile, sales, onChange, toast }) {
 function ClientBoughtBlocksPage({ profile, blocks, quarries, toast }) {
   const [detailBlock, setDetailBlock] = useState(null)
   const [filterMaterial, setFilterMaterial] = useState('')
-  const [filterPeriod, setFilterPeriod] = useState('all')
+  const [filterPeriod, setFilterPeriod] = useState('month')
   const [dtInicio, setDtInicio] = useState('')
   const [dtFim, setDtFim] = useState('')
 
@@ -3296,7 +3386,7 @@ function ClientBoughtBlocksPage({ profile, blocks, quarries, toast }) {
   return (
     <div>
       <div className="ph">
-        <div className="ptit">📦 Meus Blocos</div>
+        <div className="ptit">📦 Blocos Comprados</div>
         <div className="psub">{filtered.length} bloco(s) · {totalM3.toFixed(2)} m³ {hasFilter ? `(de ${blocks.length} total)` : ''}</div>
       </div>
 
@@ -3899,10 +3989,12 @@ function SoldBlocksPage({ profile, blocks, quarries, sales, onChange, toast }) {
   const [detailBlock, setDetailBlock] = useState(null)
   const [filterMaterial, setFilterMaterial] = useState('')
   const [filterQuarry, setFilterQuarry] = useState('')
-  const [filterPeriod, setFilterPeriod] = useState('all')
+  const [filterPeriod, setFilterPeriod] = useState('month')
   const [filterClient, setFilterClient] = useState('')
+  const [filterBlock, setFilterBlock] = useState('')
   const [dtInicio, setDtInicio] = useState('')
   const [dtFim, setDtFim] = useState('')
+  const [mobileGrid2, setMobileGrid2] = useState(false)
 
   // Cria um mapa block_id -> sale info (cliente, data)
   const blockSaleInfo = {}
@@ -3924,6 +4016,7 @@ function SoldBlocksPage({ profile, blocks, quarries, sales, onChange, toast }) {
   const filteredBlocks = soldBlocks.filter(b => {
     if (filterMaterial && b.material !== filterMaterial) return false
     if (filterQuarry && b.quarry_id !== filterQuarry) return false
+    if (filterBlock && !(b.code || '').toLowerCase().includes(filterBlock.toLowerCase())) return false
     const info = blockSaleInfo[b.id]
     if (filterClient && info?.client !== filterClient) return false
     const refDate = info?.date || b.updated_at || b.created_at
@@ -3950,7 +4043,7 @@ function SoldBlocksPage({ profile, blocks, quarries, sales, onChange, toast }) {
   const totalBRL = filteredBlocks.filter(b => !b.currency || b.currency === 'BRL').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
   const totalUSD = filteredBlocks.filter(b => b.currency === 'USD').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
 
-  const hasFilter = filterMaterial || filterQuarry || filterClient || filterPeriod !== 'all'
+  const hasFilter = filterMaterial || filterQuarry || filterClient || filterBlock || filterPeriod !== 'month'
 
   return (
     <div>
@@ -3961,6 +4054,13 @@ function SoldBlocksPage({ profile, blocks, quarries, sales, onChange, toast }) {
             <div className="psub">{filteredBlocks.length} bloco(s) {hasFilter ? `de ${soldBlocks.length}` : ''}</div>
           </div>
         </div>
+      </div>
+
+      {/* Mobile toggle 2 cols */}
+      <div className="mobile-only" style={{ display: 'none', marginBottom: 12 }}>
+        <button className="btn bo bsm" onClick={() => setMobileGrid2(!mobileGrid2)}>
+          {mobileGrid2 ? '☰ Ver 1 por linha' : '⊞ Ver 2 por linha'}
+        </button>
       </div>
 
       {/* Resumo */}
@@ -3989,10 +4089,10 @@ function SoldBlocksPage({ profile, blocks, quarries, sales, onChange, toast }) {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Filtros:</span>
             <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
-              <option value="all">Todos os períodos</option>
               <option value="month">Mês atual</option>
               <option value="last_month">Mês anterior</option>
               <option value="year">Ano atual</option>
+              <option value="all">Todos os períodos</option>
               <option value="custom">Período personalizado</option>
             </select>
             {filterPeriod === 'custom' && (
@@ -4001,6 +4101,7 @@ function SoldBlocksPage({ profile, blocks, quarries, sales, onChange, toast }) {
                 <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} onChange={e => setDtFim(e.target.value)} />
               </>
             )}
+            <input className="fc" style={{ fontSize: 13, padding: '7px 12px', flex: '0 1 150px', minWidth: 130, textTransform: 'uppercase' }} placeholder="Nº do bloco..." value={filterBlock} onChange={e => setFilterBlock(e.target.value.toUpperCase())} />
             <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
               <option value="">Todas as pedreiras</option>
               {quarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
@@ -4014,7 +4115,7 @@ function SoldBlocksPage({ profile, blocks, quarries, sales, onChange, toast }) {
               {allClients.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             {hasFilter && (
-              <button className="btn bo bsm" onClick={() => { setFilterMaterial(''); setFilterQuarry(''); setFilterClient(''); setFilterPeriod('all'); setDtInicio(''); setDtFim('') }}>
+              <button className="btn bo bsm" onClick={() => { setFilterMaterial(''); setFilterQuarry(''); setFilterClient(''); setFilterBlock(''); setFilterPeriod('month'); setDtInicio(''); setDtFim('') }}>
                 <Icon n="x" s={13} /> Limpar
               </button>
             )}
@@ -4028,7 +4129,7 @@ function SoldBlocksPage({ profile, blocks, quarries, sales, onChange, toast }) {
           <div className="estit">Nenhum bloco vendido encontrado</div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: mobileGrid2 ? 'repeat(auto-fill,minmax(140px,1fr))' : 'repeat(auto-fill,minmax(280px,1fr))' }}>
           {filteredBlocks.map(b => {
             const q = quarries.find(x => x.id === b.quarry_id)
             const info = blockSaleInfo[b.id]
@@ -4536,21 +4637,40 @@ function ReserveReleaseModal({ profile, selectedBlocks, clients, onClose, onSucc
 }
 
 function CommissionsPage({ profile, sales, team, toast }) {
+  const [filterPeriod, setFilterPeriod] = useState('month')
   const [dtInicio, setDtInicio] = useState('')
   const [dtFim, setDtFim] = useState('')
+  const [filterSeller, setFilterSeller] = useState('')
   const [expandedSeller, setExpandedSeller] = useState(null)
 
   const today = new Date().toISOString().slice(0, 10)
 
-  const sellers = team.filter(t => t.role === 'seller')
+  const allSellers = team.filter(t => t.role === 'seller')
+  const sellers = filterSeller ? allSellers.filter(s => s.id === filterSeller) : allSellers
+
+  const matchesPeriod = (d) => {
+    if (filterPeriod === 'all') return true
+    if (filterPeriod === 'custom') {
+      if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
+      if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+      return true
+    }
+    const now = new Date()
+    if (filterPeriod === 'month') {
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+    } else if (filterPeriod === 'last_month') {
+      const last = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      return d.getMonth() === last.getMonth() && d.getFullYear() === last.getFullYear()
+    } else if (filterPeriod === 'year') {
+      return d.getFullYear() === now.getFullYear()
+    }
+    return true
+  }
 
   const sellerData = sellers.map(s => {
     const sellerSales = sales.filter(sale => {
       if (sale.seller_id !== s.id) return false
-      const d = new Date(sale.created_at)
-      if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
-      if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
-      return true
+      return matchesPeriod(new Date(sale.created_at))
     })
     const totalBRL = sellerSales.reduce((a, x) => a + (Number(x.total_brl) || 0), 0)
     const totalUSD = sellerSales.reduce((a, x) => a + (Number(x.total_usd) || 0), 0)
@@ -4562,14 +4682,49 @@ function CommissionsPage({ profile, sales, team, toast }) {
   const grandTotal = sellerData.reduce((a, d) => a + d.totalBRL, 0)
   const grandCommission = sellerData.reduce((a, d) => a + d.commission, 0)
 
+  const hasFilter = filterPeriod !== 'month' || filterSeller || dtInicio || dtFim
+
   return (
     <div>
       <div className="ph">
         <div className="ptit">Comissões</div>
         <div className="psub">
-          {dtInicio || dtFim
-            ? `Período: ${dtInicio ? fmtDate(new Date(dtInicio + 'T12:00:00')) : 'início'} → ${dtFim ? fmtDate(new Date(dtFim + 'T12:00:00')) : 'hoje'}`
-            : 'Todos os períodos'}
+          {filterPeriod === 'month' ? 'Mês atual' :
+           filterPeriod === 'last_month' ? 'Mês anterior' :
+           filterPeriod === 'year' ? 'Ano atual' :
+           filterPeriod === 'all' ? 'Todos os períodos' :
+           `Período: ${dtInicio ? fmtDate(new Date(dtInicio + 'T12:00:00')) : 'início'} → ${dtFim ? fmtDate(new Date(dtFim + 'T12:00:00')) : 'hoje'}`}
+        </div>
+      </div>
+
+      {/* Filtros */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="cb" style={{ padding: '12px 14px' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Filtros:</span>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
+              <option value="month">Mês atual</option>
+              <option value="last_month">Mês anterior</option>
+              <option value="year">Ano atual</option>
+              <option value="all">Todos os períodos</option>
+              <option value="custom">Período personalizado</option>
+            </select>
+            {filterPeriod === 'custom' && (
+              <>
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} max={dtFim || today} onChange={e => setDtInicio(e.target.value)} />
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} min={dtInicio} max={today} onChange={e => setDtFim(e.target.value)} />
+              </>
+            )}
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterSeller} onChange={e => setFilterSeller(e.target.value)}>
+              <option value="">Todos os vendedores</option>
+              {allSellers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            {hasFilter && (
+              <button className="btn bo bsm" onClick={() => { setFilterPeriod('month'); setFilterSeller(''); setDtInicio(''); setDtFim('') }}>
+                <Icon n="x" s={13} /> Limpar
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -4589,27 +4744,6 @@ function CommissionsPage({ profile, sales, team, toast }) {
           <div className="sico" style={{ background: 'var(--sap1)' }}><Icon n="user" s={20} c="var(--sap7)" /></div>
           <div className="sval">{sellers.filter(s => s.commission).length}</div>
           <div className="slbl2">Vendedores c/ comissão</div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div className="cb" style={{ padding: '14px 18px' }}>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <label className="fl" style={{ margin: 0 }}>De</label>
-              <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} max={dtFim || today} onChange={e => setDtInicio(e.target.value)} />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <label className="fl" style={{ margin: 0 }}>Até</label>
-              <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} min={dtInicio} max={today} onChange={e => setDtFim(e.target.value)} />
-            </div>
-            {(dtInicio || dtFim) && (
-              <button className="btn bo bsm" onClick={() => { setDtInicio(''); setDtFim('') }}>
-                <Icon n="x" s={13} /> Limpar
-              </button>
-            )}
-          </div>
         </div>
       </div>
 
@@ -5036,7 +5170,7 @@ export default function App() {
     NAV = [
       { p: 'catalog',           l: 'Catálogo',         i: 'cube' },
       { p: 'client_purchases',  l: 'Minhas Compras',   i: 'cart' },
-      { p: 'client_blocks',     l: 'Meus Blocos',      i: 'check' },
+      { p: 'client_blocks',     l: 'Blocos Comprados',      i: 'check' },
     ]
   }
 
