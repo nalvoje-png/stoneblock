@@ -4040,8 +4040,24 @@ function SoldBlocksPage({ profile, blocks, quarries, sales, onChange, toast }) {
     return true
   })
 
-  const totalBRL = filteredBlocks.filter(b => !b.currency || b.currency === 'BRL').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
-  const totalUSD = filteredBlocks.filter(b => b.currency === 'USD').reduce((a, b) => a + (Number(b.total_value) || 0), 0)
+  // Total em R$ — inclui blocos em BRL + blocos em USD convertidos pela cotação da venda
+  let totalBRL = 0
+  let totalUSD = 0
+  filteredBlocks.forEach(b => {
+    const v = Number(b.total_value) || 0
+    if (b.currency === 'USD') {
+      totalUSD += v
+      // Tenta achar a cotação na venda associada
+      const info = blockSaleInfo[b.id]
+      const rate = Number(info?.sale?.dollar_rate) || 0
+      if (rate > 0) {
+        totalBRL += v * rate
+      }
+    } else {
+      // BRL (ou sem currency definido)
+      totalBRL += v
+    }
+  })
 
   const hasFilter = filterMaterial || filterQuarry || filterClient || filterBlock || filterPeriod !== 'month'
 
@@ -4066,12 +4082,14 @@ function SoldBlocksPage({ profile, blocks, quarries, sales, onChange, toast }) {
       {/* Resumo */}
       {filteredBlocks.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12, marginBottom: 16 }}>
-          <div className="card" style={{ background: 'linear-gradient(135deg,#10b981,#059669)', border: 'none' }}>
-            <div className="cb">
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Total Vendido R$</div>
-              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 26, color: '#fff' }}>{money(totalBRL, 'BRL')}</div>
+          {totalBRL > 0 && (
+            <div className="card" style={{ background: 'linear-gradient(135deg,#10b981,#059669)', border: 'none' }}>
+              <div className="cb">
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Total Vendido R$</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 26, color: '#fff' }}>{money(totalBRL, 'BRL')}</div>
+              </div>
             </div>
-          </div>
+          )}
           {totalUSD > 0 && (
             <div className="card" style={{ background: 'linear-gradient(135deg,#0c1a2e,#1e3a8a)', border: 'none' }}>
               <div className="cb">
@@ -4863,8 +4881,397 @@ function NotificationsPanel({ profile, notifications, onChange, onClose }) {
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
-// SETTINGS MODAL — edita perfil/empresa (nome, logo)
+// ADMIN PAGE — Stone Block /admin (gerenciamento de empresas)
 // ═══════════════════════════════════════════════════════════════
+function AdminPage({ profile, toast }) {
+  const [tab, setTab] = useState('buyers') // 'buyers' | 'quarries' | 'externals'
+  const [buyers, setBuyers] = useState([])
+  const [quarryCompanies, setQuarryCompanies] = useState([])
+  const [externalQuarries, setExternalQuarriesState] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showBuyerForm, setShowBuyerForm] = useState(false)
+  const [showQuarryForm, setShowQuarryForm] = useState(false)
+
+  const [buyerForm, setBuyerForm] = useState({
+    name: '', document: '', contact_email: '', contact_phone: '', notes: '',
+    director_name: '', director_email: '', director_password: '',
+  })
+  const [quarryForm, setQuarryForm] = useState({
+    name: '', company_name: '', phone: '',
+    email: '', password: '',
+  })
+  const [saving, setSaving] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const [b, q, e] = await Promise.all([
+        api.adminListBuyerCompanies(),
+        api.adminListQuarryCompanies(),
+        api.listExternalQuarries(),
+      ])
+      setBuyers(b); setQuarryCompanies(q); setExternalQuarriesState(e)
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [])
+
+  const saveBuyer = async () => {
+    if (!buyerForm.name.trim()) { toast('Nome da indústria obrigatório.', 'err'); return }
+    if (!buyerForm.director_name.trim() || !buyerForm.director_email.trim() || !buyerForm.director_password) {
+      toast('Dados do diretor são obrigatórios.', 'err'); return
+    }
+    if (buyerForm.director_password.length < 6) { toast('Senha mínima 6 caracteres.', 'err'); return }
+    setSaving(true)
+    try {
+      await api.adminCreateBuyerCompany(
+        {
+          name: buyerForm.name.trim(),
+          document: buyerForm.document.trim() || null,
+          contact_email: buyerForm.contact_email.trim() || null,
+          contact_phone: buyerForm.contact_phone.trim() || null,
+          notes: buyerForm.notes.trim() || null,
+        },
+        {
+          name: buyerForm.director_name.trim(),
+          email: buyerForm.director_email.trim(),
+          password: buyerForm.director_password,
+        }
+      )
+      toast('Indústria cadastrada!', 'ok')
+      setShowBuyerForm(false)
+      setBuyerForm({ name: '', document: '', contact_email: '', contact_phone: '', notes: '', director_name: '', director_email: '', director_password: '' })
+      await load()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  const saveQuarry = async () => {
+    if (!quarryForm.name.trim() || !quarryForm.email.trim() || !quarryForm.password) {
+      toast('Nome, e-mail e senha são obrigatórios.', 'err'); return
+    }
+    if (quarryForm.password.length < 6) { toast('Senha mínima 6 caracteres.', 'err'); return }
+    setSaving(true)
+    try {
+      await api.adminCreateQuarryCompany({
+        name: quarryForm.name.trim(),
+        company_name: quarryForm.company_name.trim() || quarryForm.name.trim(),
+        phone: quarryForm.phone.trim() || null,
+        email: quarryForm.email.trim(),
+        password: quarryForm.password,
+      })
+      toast('Pedreira cadastrada!', 'ok')
+      setShowQuarryForm(false)
+      setQuarryForm({ name: '', company_name: '', phone: '', email: '', password: '' })
+      await load()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  const toggleBuyerActive = async (b) => {
+    try {
+      await api.adminToggleBuyerCompanyActive(b.id, !b.active)
+      toast(b.active ? 'Indústria suspensa.' : 'Indústria reativada.', 'ok')
+      await load()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="ptit">🔧 Administração do Stone Block</div>
+            <div className="psub">Painel privado — gerenciamento de empresas</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap', borderBottom: '1px solid var(--fog)', paddingBottom: 8 }}>
+        <button className={'btn ' + (tab === 'buyers' ? 'bb' : 'bo') + ' bsm'} onClick={() => setTab('buyers')}>
+          🏭 Indústrias ({buyers.length})
+        </button>
+        <button className={'btn ' + (tab === 'quarries' ? 'bb' : 'bo') + ' bsm'} onClick={() => setTab('quarries')}>
+          ⛰️ Pedreiras ({quarryCompanies.length})
+        </button>
+        <button className={'btn ' + (tab === 'externals' ? 'bb' : 'bo') + ' bsm'} onClick={() => setTab('externals')}>
+          📍 Pedreiras Externas ({externalQuarries.length})
+        </button>
+      </div>
+
+      {/* Indústrias */}
+      {tab === 'buyers' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <button className="btn bb" onClick={() => setShowBuyerForm(true)}>
+              <Icon n="plus" s={16} c="#fff" /> Nova Indústria
+            </button>
+          </div>
+
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 30, color: 'var(--mist)' }}>Carregando...</div>
+          ) : buyers.length === 0 ? (
+            <div className="es"><div className="estit">Nenhuma indústria cadastrada</div></div>
+          ) : (
+            <div className="card"><div className="tw"><table>
+              <thead><tr>
+                <th>Nome</th><th>Documento</th><th>Contato</th><th>Status</th><th>Criada em</th><th></th>
+              </tr></thead>
+              <tbody>
+                {buyers.map(b => (
+                  <tr key={b.id}>
+                    <td style={{ fontWeight: 700 }}>{b.name}</td>
+                    <td style={{ fontSize: 13 }}>{b.document || '—'}</td>
+                    <td style={{ fontSize: 13 }}>
+                      {b.contact_email && <div>{b.contact_email}</div>}
+                      {b.contact_phone && <div style={{ color: 'var(--mist)' }}>{b.contact_phone}</div>}
+                    </td>
+                    <td>
+                      <span className="bdg" style={{ background: b.active ? '#dcfce7' : '#fee2e2', color: b.active ? '#15803d' : '#991b1b' }}>
+                        {b.active ? '✓ Ativa' : '⊘ Suspensa'}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: 13, color: 'var(--mist)' }}>{fmtDate(b.created_at)}</td>
+                    <td>
+                      <button className="btn bo bsm" onClick={() => toggleBuyerActive(b)}>
+                        {b.active ? 'Suspender' : 'Reativar'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div></div>
+          )}
+        </div>
+      )}
+
+      {/* Pedreiras */}
+      {tab === 'quarries' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <button className="btn bb" onClick={() => setShowQuarryForm(true)}>
+              <Icon n="plus" s={16} c="#fff" /> Nova Pedreira
+            </button>
+          </div>
+
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 30, color: 'var(--mist)' }}>Carregando...</div>
+          ) : quarryCompanies.length === 0 ? (
+            <div className="es"><div className="estit">Nenhuma pedreira cadastrada</div></div>
+          ) : (
+            <div className="card"><div className="tw"><table>
+              <thead><tr>
+                <th>Dono</th><th>Nome da Empresa</th><th>Criada em</th>
+              </tr></thead>
+              <tbody>
+                {quarryCompanies.map(q => (
+                  <tr key={q.id}>
+                    <td style={{ fontWeight: 700 }}>{q.name}</td>
+                    <td>{q.company_name || '—'}</td>
+                    <td style={{ fontSize: 13, color: 'var(--mist)' }}>{fmtDate(q.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div></div>
+          )}
+        </div>
+      )}
+
+      {/* Pedreiras Externas (repositório global) */}
+      {tab === 'externals' && (
+        <div>
+          <div style={{ background: '#f3e8ff', border: '1px solid #d8b4fe', padding: 12, borderRadius: 10, marginBottom: 16, fontSize: 13, color: '#6b21a8' }}>
+            💡 Pedreiras "externas" são pedreiras que ainda não usam o Stone Block. Elas aparecem aqui quando marcadores de indústrias as cadastram em blocos. Use isso para prospecção comercial.
+          </div>
+
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 30, color: 'var(--mist)' }}>Carregando...</div>
+          ) : externalQuarries.length === 0 ? (
+            <div className="es"><div className="estit">Nenhuma pedreira externa cadastrada ainda</div></div>
+          ) : (
+            <div className="card"><div className="tw"><table>
+              <thead><tr>
+                <th>Nome</th><th>Localização</th><th>Contato</th><th>Vista pela primeira vez</th>
+              </tr></thead>
+              <tbody>
+                {externalQuarries.map(q => (
+                  <tr key={q.id}>
+                    <td style={{ fontWeight: 700 }}>{q.name}</td>
+                    <td style={{ fontSize: 13 }}>{q.location || '—'}</td>
+                    <td style={{ fontSize: 13 }}>
+                      {q.contact_email && <div>{q.contact_email}</div>}
+                      {q.contact_phone && <div style={{ color: 'var(--mist)' }}>{q.contact_phone}</div>}
+                    </td>
+                    <td style={{ fontSize: 13, color: 'var(--mist)' }}>{fmtDate(q.first_seen_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div></div>
+          )}
+        </div>
+      )}
+
+      {/* Modal nova indústria */}
+      {showBuyerForm && (
+        <div className="mo" onClick={() => setShowBuyerForm(false)}>
+          <div className="md" onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div className="mtit">🏭 Nova Indústria Compradora</div>
+              <button className="btn bo bsm" onClick={() => setShowBuyerForm(false)}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 8 }}>
+                Dados da Empresa
+              </div>
+              <div className="fg">
+                <label className="fl">Nome da indústria *</label>
+                <input className="fc" value={buyerForm.name} onChange={e => setBuyerForm({ ...buyerForm, name: e.target.value })} placeholder="Ex: Granitos Brasil Ltda" />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div className="fg">
+                  <label className="fl">CNPJ</label>
+                  <input className="fc" value={buyerForm.document} onChange={e => setBuyerForm({ ...buyerForm, document: e.target.value })} />
+                </div>
+                <div className="fg">
+                  <label className="fl">Telefone</label>
+                  <input className="fc" value={buyerForm.contact_phone} onChange={e => setBuyerForm({ ...buyerForm, contact_phone: e.target.value })} />
+                </div>
+              </div>
+              <div className="fg">
+                <label className="fl">E-mail de contato</label>
+                <input className="fc" type="email" value={buyerForm.contact_email} onChange={e => setBuyerForm({ ...buyerForm, contact_email: e.target.value })} />
+              </div>
+              <div className="fg">
+                <label className="fl">Observações</label>
+                <textarea className="fc" value={buyerForm.notes} onChange={e => setBuyerForm({ ...buyerForm, notes: e.target.value })} />
+              </div>
+
+              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginTop: 16, marginBottom: 8, paddingTop: 12, borderTop: '1px solid var(--fog)' }}>
+                Diretor de Compras (acesso inicial)
+              </div>
+              <div className="fg">
+                <label className="fl">Nome do diretor *</label>
+                <input className="fc" value={buyerForm.director_name} onChange={e => setBuyerForm({ ...buyerForm, director_name: e.target.value })} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div className="fg">
+                  <label className="fl">E-mail *</label>
+                  <input className="fc" type="email" value={buyerForm.director_email} onChange={e => setBuyerForm({ ...buyerForm, director_email: e.target.value })} />
+                </div>
+                <div className="fg">
+                  <label className="fl">Senha *</label>
+                  <input className="fc" type="text" value={buyerForm.director_password} onChange={e => setBuyerForm({ ...buyerForm, director_password: e.target.value })} placeholder="Mínimo 6 caracteres" />
+                </div>
+              </div>
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={() => setShowBuyerForm(false)}>Cancelar</button>
+              <button className="btn bb" onClick={saveBuyer} disabled={saving}>
+                {saving ? <><span className="spinner"></span> Cadastrando</> : 'Cadastrar Indústria'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal nova pedreira */}
+      {showQuarryForm && (
+        <div className="mo" onClick={() => setShowQuarryForm(false)}>
+          <div className="md" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div className="mtit">⛰️ Nova Pedreira (Stone Block)</div>
+              <button className="btn bo bsm" onClick={() => setShowQuarryForm(false)}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              <div className="fg">
+                <label className="fl">Nome do dono *</label>
+                <input className="fc" value={quarryForm.name} onChange={e => setQuarryForm({ ...quarryForm, name: e.target.value })} />
+              </div>
+              <div className="fg">
+                <label className="fl">Nome da empresa (exibido no romaneio)</label>
+                <input className="fc" value={quarryForm.company_name} onChange={e => setQuarryForm({ ...quarryForm, company_name: e.target.value })} placeholder="Ex: MINERAÇÃO VMC" />
+              </div>
+              <div className="fg">
+                <label className="fl">Telefone</label>
+                <input className="fc" value={quarryForm.phone} onChange={e => setQuarryForm({ ...quarryForm, phone: e.target.value })} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div className="fg">
+                  <label className="fl">E-mail *</label>
+                  <input className="fc" type="email" value={quarryForm.email} onChange={e => setQuarryForm({ ...quarryForm, email: e.target.value })} />
+                </div>
+                <div className="fg">
+                  <label className="fl">Senha *</label>
+                  <input className="fc" type="text" value={quarryForm.password} onChange={e => setQuarryForm({ ...quarryForm, password: e.target.value })} placeholder="Mínimo 6 caracteres" />
+                </div>
+              </div>
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={() => setShowQuarryForm(false)}>Cancelar</button>
+              <button className="btn bb" onClick={saveQuarry} disabled={saving}>
+                {saving ? <><span className="spinner"></span> Cadastrando</> : 'Cadastrar Pedreira'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND DASHBOARD — placeholder para Stone Block Ind (etapas seguintes)
+// ═══════════════════════════════════════════════════════════════
+function IndDashboardPage({ profile, buyerData, toast }) {
+  if (!buyerData) {
+    return <div style={{ padding: 40, textAlign: 'center', color: 'var(--mist)' }}>Carregando dados da indústria...</div>
+  }
+  const { company, team, inspections, externalBlocks, lists, carts } = buyerData
+  const draftCart = (carts || []).find(c => c.status === 'draft')
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">Olá, {profile.name.split(' ')[0]}!</div>
+        <div className="psub">{company?.name} · {profile.buyer_role === 'director' ? 'Diretor' : profile.buyer_role === 'buyer' ? 'Comprador' : profile.buyer_role === 'marker' ? 'Marcador' : 'Assistente'}</div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 20 }}>
+        <div className="card"><div className="cb">
+          <div className="slbl2">Blocos Inspecionados</div>
+          <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{inspections?.length || 0}</div>
+        </div></div>
+        <div className="card"><div className="cb">
+          <div className="slbl2">Blocos Externos</div>
+          <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{externalBlocks?.length || 0}</div>
+        </div></div>
+        <div className="card"><div className="cb">
+          <div className="slbl2">Listas de Interesse</div>
+          <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{lists?.length || 0}</div>
+        </div></div>
+        <div className="card"><div className="cb">
+          <div className="slbl2">Carrinhos</div>
+          <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{carts?.length || 0}</div>
+        </div></div>
+      </div>
+
+      <div className="card" style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: 18 }}>
+        <div style={{ fontWeight: 700, color: '#854d0e', marginBottom: 8 }}>🚧 Etapa 1 instalada</div>
+        <div style={{ fontSize: 13, color: '#92400e', lineHeight: 1.6 }}>
+          A base do Stone Block Ind está pronta. Em breve você terá:
+          <ul style={{ margin: '8px 0 0 20px' }}>
+            <li>Buscar bloco por código (em pedreiras cadastradas)</li>
+            <li>Cadastrar blocos de pedreiras externas</li>
+            <li>Adicionar fotos de inspeção e observações internas</li>
+            <li>Listas de interesse e carrinhos</li>
+            <li>Confirmação de compra + romaneio em PDF</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 function SettingsModal({ profile, onClose, onSaved, toast }) {
   const [companyName, setCompanyName] = useState(profile.company_name || '')
   const [logoUrl, setLogoUrl] = useState(profile.logo_url || '')
@@ -4952,6 +5359,9 @@ function SettingsModal({ profile, onClose, onSaved, toast }) {
 }
 
 export default function App() {
+  // Detect /admin route
+  const isAdminRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')
+
   const [profile, setProfile]     = useState(null)
   const [loading, setLoading]     = useState(true)
   const [page,    setPage]        = useState('dashboard')
@@ -4959,6 +5369,15 @@ export default function App() {
   // Set initial page when profile loads
   useEffect(() => {
     if (!profile) return
+    // Stone Block Ind users go to ind dashboard
+    if (profile.buyer_company_id) {
+      setPage('ind_dashboard')
+      return
+    }
+    if (isAdminRoute && profile.is_app_admin) {
+      setPage('admin')
+      return
+    }
     const initial = {
       owner: 'dashboard',
       foreman: 'blocks',
@@ -4966,7 +5385,7 @@ export default function App() {
       client: 'catalog',
     }
     setPage(initial[profile.role] || 'dashboard')
-  }, [profile?.id, profile?.role])
+  }, [profile?.id, profile?.role, profile?.buyer_company_id, profile?.is_app_admin, isAdminRoute])
   const [sbOpen,  setSbOpen]      = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [toast,   setToast]       = useState(null)
@@ -4983,6 +5402,8 @@ export default function App() {
   const [notifications, setNotifications] = useState([])
   const [favorites,     setFavorites]     = useState([])
   const [notifOpen,     setNotifOpen]     = useState(false)
+  // Stone Block Ind state
+  const [buyerData, setBuyerData] = useState(null)
 
   const showToast = useCallback((msg, type = '') => {
     setToast({ msg, type })
@@ -4993,6 +5414,27 @@ export default function App() {
   const loadData = useCallback(async (p) => {
     if (!p) return
     try {
+      // Stone Block Ind users (indústria compradora)
+      if (p.buyer_company_id) {
+        const bd = await api.loadBuyerCompanyData(p)
+        setBuyerData(bd)
+        // limpa state da pedreira
+        setQuarries([]); setClients([]); setPayments([]); setBlocks([])
+        setSales([]); setTeam([]); setReleases([]); setCatalog([]); setFavorites([]); setOrders([])
+        const notif = await api.listNotifications(p)
+        setNotifications(notif)
+        return
+      }
+
+      // App admin (rota /admin)
+      if (p.is_app_admin && isAdminRoute) {
+        // não precisa carregar dados de pedreira; o componente admin busca tudo
+        setQuarries([]); setClients([]); setPayments([]); setBlocks([])
+        setSales([]); setTeam([]); setReleases([]); setCatalog([]); setFavorites([]); setOrders([])
+        setNotifications([])
+        return
+      }
+
       // If client, load catalog; otherwise load full team data
       if (p.role === 'client') {
         const [cat, ord, notif, favs, clSales, clBoughtBlocks] = await Promise.all([
@@ -5004,9 +5446,8 @@ export default function App() {
           api.listClientBoughtBlocks(p),
         ])
         setCatalog(cat); setOrders(ord); setNotifications(notif); setFavorites(favs)
-        setSales(clSales)        // reusa o state de sales para as compras do cliente
-        setBlocks(clBoughtBlocks) // reusa o state de blocks para os blocos comprados
-        // Empty arrays for unused data
+        setSales(clSales)
+        setBlocks(clBoughtBlocks)
         setQuarries([]); setClients([]); setPayments([]); setTeam([]); setReleases([])
       } else {
         const [q, c, pm, b, s, t, r, ord, notif] = await Promise.all([
@@ -5028,7 +5469,7 @@ export default function App() {
       console.error('loadData error:', e)
       showToast('Erro ao carregar dados: ' + e.message, 'err')
     }
-  }, [showToast])
+  }, [showToast, isAdminRoute])
 
   // Simple init — check session once, no callbacks, no events
   useEffect(() => {
@@ -5105,6 +5546,7 @@ export default function App() {
   const handleLogout = async () => {
     try { await api.signOut() } catch (e) { console.error(e) }
     setProfile(null)
+    setBuyerData(null)
     setBlocks([]); setQuarries([]); setClients([]); setPayments([]); setSales([])
     setTeam([]); setReleases([]); setCatalog([]); setOrders([]); setNotifications([]); setFavorites([])
   }
@@ -5136,7 +5578,18 @@ export default function App() {
 
   // Navigation based on role
   let NAV = []
-  if (profile.role === 'owner') {
+
+  // Stone Block Ind users
+  if (profile.buyer_company_id) {
+    NAV = [
+      { p: 'ind_dashboard', l: 'Dashboard',         i: 'grid' },
+    ]
+  // App admin (rota /admin)
+  } else if (profile.is_app_admin && isAdminRoute) {
+    NAV = [
+      { p: 'admin', l: 'Administração', i: 'grid' },
+    ]
+  } else if (profile.role === 'owner') {
     NAV = [
       { p: 'dashboard',   l: 'Dashboard',         i: 'grid' },
       { p: 'blocks',      l: 'Blocos',            i: 'cube' },
@@ -5176,6 +5629,8 @@ export default function App() {
 
   const renderPage = () => {
     switch (page) {
+      case 'admin':         return <AdminPage profile={profile} toast={showToast} />
+      case 'ind_dashboard': return <IndDashboardPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'dashboard':   return <Dashboard blocks={blocks} quarries={quarries} clients={clients} sales={sales} />
       case 'blocks':      return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
       case 'sales':       return <SalesPage profile={profile} sales={sales} blocks={blocks} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
@@ -5204,7 +5659,12 @@ export default function App() {
         <div className="tb">
           <div className="tbl">
             <button className="tbbtn" onClick={() => setSbOpen(v => !v)}><Icon n="menu" s={20} c="#fff" /></button>
-            <div className="tblogo">Stone <span>Block</span></div>
+            <div className="tblogo">
+              {profile.buyer_company_id
+                ? <>Stone <span>Block</span> <span style={{fontSize:13,fontWeight:600,color:'rgba(255,255,255,.6)',letterSpacing:1}}>IND</span></>
+                : <>Stone <span>Block</span></>
+              }
+            </div>
           </div>
           <div className="tbr">
             <div style={{ position: 'relative' }}>

@@ -1029,3 +1029,499 @@ export async function listClientBoughtBlocks(profile) {
   })
   return result
 }
+
+// ═══════════════════════════════════════════════════════════════
+// STONE BLOCK IND — Empresas Compradoras (Indústrias)
+// ═══════════════════════════════════════════════════════════════
+
+// ─── ADMIN: listar / criar / atualizar empresas ─────────────────
+export async function adminListBuyerCompanies() {
+  const { data, error } = await supabase
+    .from('buyer_companies')
+    .select('*')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+export async function adminListQuarryCompanies() {
+  // Lista pedreiras (owners). Cada owner é uma empresa.
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, name, company_name, role, created_at, logo_url')
+    .eq('role', 'owner')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+export async function adminCreateBuyerCompany(payload, directorData) {
+  // 1. Cria a empresa compradora
+  const { data: company, error: companyError } = await supabase
+    .from('buyer_companies')
+    .insert({
+      name: payload.name,
+      document: payload.document || null,
+      contact_email: payload.contact_email || null,
+      contact_phone: payload.contact_phone || null,
+      notes: payload.notes || null,
+      active: true,
+    })
+    .select()
+    .single()
+  if (companyError) throw companyError
+
+  // 2. Cria o diretor (conta no Auth)
+  if (directorData?.email && directorData?.password) {
+    const user = await signUpUser(directorData.email, directorData.password, {
+      name: directorData.name,
+      role: 'buyer_director',
+    })
+    if (user?.id) {
+      // Aguarda trigger criar profile
+      let profileExists = false
+      for (let i = 0; i < 6; i++) {
+        await new Promise(r => setTimeout(r, 500))
+        const { data: p } = await supabase.from('profiles').select('id').eq('id', user.id).maybeSingle()
+        if (p) { profileExists = true; break }
+      }
+
+      const profileData = {
+        role: 'buyer_director',
+        buyer_company_id: company.id,
+        buyer_role: 'director',
+        company_id: null,
+        name: directorData.name,
+        avatar: directorData.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
+      }
+
+      if (profileExists) {
+        await supabase.from('profiles').update(profileData).eq('id', user.id)
+      } else {
+        await supabase.from('profiles').insert({ id: user.id, ...profileData })
+      }
+    }
+  }
+
+  return company
+}
+
+export async function adminCreateQuarryCompany(ownerData) {
+  // Cria conta de owner de pedreira
+  if (!ownerData?.email || !ownerData?.password) {
+    throw new Error('E-mail e senha do dono são obrigatórios')
+  }
+
+  const user = await signUpUser(ownerData.email, ownerData.password, {
+    name: ownerData.name,
+    role: 'owner',
+  })
+
+  if (!user?.id) throw new Error('Falha ao criar conta')
+
+  // Aguarda trigger criar profile
+  let profileExists = false
+  for (let i = 0; i < 6; i++) {
+    await new Promise(r => setTimeout(r, 500))
+    const { data: p } = await supabase.from('profiles').select('id').eq('id', user.id).maybeSingle()
+    if (p) { profileExists = true; break }
+  }
+
+  // Owner é dono de si mesmo
+  const profileData = {
+    role: 'owner',
+    company_id: user.id,
+    company_name: ownerData.company_name || ownerData.name,
+    name: ownerData.name,
+    phone: ownerData.phone || null,
+    avatar: ownerData.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
+  }
+
+  if (profileExists) {
+    await supabase.from('profiles').update(profileData).eq('id', user.id)
+  } else {
+    await supabase.from('profiles').insert({ id: user.id, ...profileData })
+  }
+
+  return { id: user.id, ...profileData }
+}
+
+export async function adminUpdateBuyerCompany(id, payload) {
+  const { error } = await supabase
+    .from('buyer_companies')
+    .update(payload)
+    .eq('id', id)
+  if (error) throw error
+  return { id, ...payload }
+}
+
+export async function adminToggleBuyerCompanyActive(id, active) {
+  const { error } = await supabase
+    .from('buyer_companies')
+    .update({ active })
+    .eq('id', id)
+  if (error) throw error
+}
+
+// ─── PERFIL DA INDÚSTRIA (geral) ────────────────────────────────
+export async function getBuyerCompany(buyerCompanyId) {
+  const { data, error } = await supabase
+    .from('buyer_companies')
+    .select('*')
+    .eq('id', buyerCompanyId)
+    .maybeSingle()
+  if (error) throw error
+  return data
+}
+
+// ─── LISTAR PEDREIRAS EXTERNAS (admin e indústria) ──────────────
+export async function listExternalQuarries() {
+  const { data, error } = await supabase
+    .from('external_quarries')
+    .select('*')
+    .order('name')
+  if (error) throw error
+  return data || []
+}
+
+export async function findOrCreateExternalQuarry(name, extra = {}) {
+  // Busca por nome (case insensitive)
+  const { data: existing } = await supabase
+    .from('external_quarries')
+    .select('*')
+    .ilike('name', name.trim())
+    .maybeSingle()
+  if (existing) return existing
+
+  const { data, error } = await supabase
+    .from('external_quarries')
+    .insert({
+      name: name.trim(),
+      location: extra.location || null,
+      contact_phone: extra.contact_phone || null,
+      contact_email: extra.contact_email || null,
+      notes: extra.notes || null,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+// ─── BUSCAR BLOCO POR CÓDIGO (em todas as pedreiras) ────────────
+export async function searchBlockByCode(code) {
+  if (!code || !code.trim()) return null
+  const { data, error } = await supabase
+    .from('blocks')
+    .select('*')
+    .ilike('code', code.trim())
+    .limit(5)
+  if (error) throw error
+  return data || []
+}
+
+// ─── CARREGAR DADOS COMPLETOS DA INDÚSTRIA ──────────────────────
+export async function loadBuyerCompanyData(profile) {
+  const companyId = profile.buyer_company_id
+  if (!companyId) return null
+
+  const [
+    company,
+    team,
+    inspections,
+    externalBlocks,
+    lists,
+    carts,
+    externalQuarries,
+  ] = await Promise.all([
+    getBuyerCompany(companyId),
+    supabase.from('profiles').select('*').eq('buyer_company_id', companyId).then(r => r.data || []),
+    supabase.from('block_inspections').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []),
+    supabase.from('external_blocks').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []),
+    supabase.from('interest_lists').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []),
+    supabase.from('buyer_carts').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []),
+    listExternalQuarries(),
+  ])
+
+  return {
+    company,
+    team,
+    inspections: inspections.map(i => ({
+      ...i,
+      photos: Array.isArray(i.photos) ? i.photos : (i.photos ? JSON.parse(i.photos) : []),
+    })),
+    externalBlocks: externalBlocks.map(b => ({
+      ...b,
+      photos: Array.isArray(b.photos) ? b.photos : (b.photos ? JSON.parse(b.photos) : []),
+    })),
+    lists,
+    carts,
+    externalQuarries,
+  }
+}
+
+// ─── CRIAR MEMBRO DA EQUIPE DA INDÚSTRIA ────────────────────────
+export async function createBuyerTeamMember(profile, email, password, payload) {
+  // profile = quem está criando (deve ser director ou app_admin)
+  const buyerCompanyId = profile.buyer_company_id
+
+  const user = await signUpUser(email, password, {
+    name: payload.name,
+    role: 'buyer_' + payload.buyer_role,
+  })
+
+  if (user?.id) {
+    let profileExists = false
+    for (let i = 0; i < 6; i++) {
+      await new Promise(r => setTimeout(r, 500))
+      const { data: p } = await supabase.from('profiles').select('id').eq('id', user.id).maybeSingle()
+      if (p) { profileExists = true; break }
+    }
+
+    const profileData = {
+      role: 'buyer_' + payload.buyer_role,
+      buyer_company_id: buyerCompanyId,
+      buyer_role: payload.buyer_role,
+      company_id: null,
+      name: payload.name,
+      phone: payload.phone || null,
+      avatar: payload.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
+    }
+
+    if (profileExists) {
+      await supabase.from('profiles').update(profileData).eq('id', user.id)
+    } else {
+      await supabase.from('profiles').insert({ id: user.id, ...profileData })
+    }
+  }
+
+  return user
+}
+
+// ─── REMOVER MEMBRO DA EQUIPE DA INDÚSTRIA ──────────────────────
+export async function removeBuyerTeamMember(memberId) {
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      buyer_company_id: null,
+      buyer_role: null,
+      role: 'inactive',
+    })
+    .eq('id', memberId)
+  if (error) throw error
+}
+
+// ─── UPLOAD DE FOTO PARA INSPEÇÃO OU BLOCO EXTERNO ──────────────
+export async function uploadInspectionPhoto(profile, file, refCode) {
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const buyerId = profile.buyer_company_id || profile.id
+  const cleanCode = (refCode || 'inspection').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)
+  const path = `${buyerId}/inspections/${Date.now()}_${cleanCode}.${ext || 'jpg'}`
+
+  const { error } = await supabase.storage
+    .from('block-photos')
+    .upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type || 'image/jpeg',
+    })
+  if (error) throw new Error(error.message || 'Falha no upload')
+
+  const { data } = supabase.storage.from('block-photos').getPublicUrl(path)
+  return data.publicUrl
+}
+
+// ─── CRIAR INSPEÇÃO DE BLOCO (pedreira cadastrada) ──────────────
+export async function createInspection(profile, payload) {
+  const { data, error } = await supabase
+    .from('block_inspections')
+    .insert({
+      original_block_id: payload.original_block_id,
+      buyer_company_id: profile.buyer_company_id,
+      marker_id: profile.id,
+      photos: payload.photos || [],
+      notes: payload.notes || null,
+      negotiated_value: payload.negotiated_value || null,
+      negotiated_currency: payload.negotiated_currency || 'USD',
+      negotiated_l: payload.negotiated_l || null,
+      negotiated_h: payload.negotiated_h || null,
+      negotiated_w: payload.negotiated_w || null,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateInspection(id, payload) {
+  const cleanPayload = { ...payload, updated_at: new Date().toISOString() }
+  delete cleanPayload.id
+  delete cleanPayload.buyer_company_id
+  delete cleanPayload.marker_id
+  delete cleanPayload.created_at
+  const { error } = await supabase
+    .from('block_inspections')
+    .update(cleanPayload)
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function deleteInspection(id) {
+  const { error } = await supabase
+    .from('block_inspections')
+    .delete()
+    .eq('id', id)
+  if (error) throw error
+}
+
+// ─── CRIAR BLOCO EXTERNO ────────────────────────────────────────
+export async function createExternalBlock(profile, payload) {
+  const { data, error } = await supabase
+    .from('external_blocks')
+    .insert({
+      ...payload,
+      buyer_company_id: profile.buyer_company_id,
+      marker_id: profile.id,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateExternalBlock(id, payload) {
+  const cleanPayload = { ...payload, updated_at: new Date().toISOString() }
+  delete cleanPayload.id
+  delete cleanPayload.buyer_company_id
+  delete cleanPayload.marker_id
+  delete cleanPayload.created_at
+  const { error } = await supabase
+    .from('external_blocks')
+    .update(cleanPayload)
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function deleteExternalBlock(id) {
+  const { error } = await supabase.from('external_blocks').delete().eq('id', id)
+  if (error) throw error
+}
+
+// ─── LISTAS DE INTERESSE ────────────────────────────────────────
+export async function createInterestList(profile, name) {
+  const { data, error } = await supabase
+    .from('interest_lists')
+    .insert({
+      buyer_company_id: profile.buyer_company_id,
+      name,
+      created_by: profile.id,
+      shared_internal: true,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function addListItem(listId, itemType, itemId, profile) {
+  const { error } = await supabase
+    .from('interest_list_items')
+    .insert({
+      list_id: listId,
+      item_type: itemType,
+      item_id: itemId,
+      added_by: profile.id,
+    })
+  if (error) throw error
+}
+
+export async function removeListItem(itemId) {
+  const { error } = await supabase
+    .from('interest_list_items')
+    .delete()
+    .eq('id', itemId)
+  if (error) throw error
+}
+
+export async function deleteList(id) {
+  const { error } = await supabase.from('interest_lists').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function listItemsForList(listId) {
+  const { data, error } = await supabase
+    .from('interest_list_items')
+    .select('*')
+    .eq('list_id', listId)
+    .order('position')
+  if (error) throw error
+  return data || []
+}
+
+// ─── CARRINHOS ──────────────────────────────────────────────────
+export async function createCart(profile, name) {
+  const { data, error } = await supabase
+    .from('buyer_carts')
+    .insert({
+      buyer_company_id: profile.buyer_company_id,
+      created_by: profile.id,
+      name: name || `Carrinho ${new Date().toLocaleDateString('pt-BR')}`,
+      status: 'draft',
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function addCartItem(cartId, itemType, itemId, profile) {
+  const { error } = await supabase
+    .from('buyer_cart_items')
+    .insert({
+      cart_id: cartId,
+      item_type: itemType,
+      item_id: itemId,
+      added_by: profile.id,
+    })
+  if (error) throw error
+}
+
+export async function removeCartItem(itemId) {
+  const { error } = await supabase
+    .from('buyer_cart_items')
+    .delete()
+    .eq('id', itemId)
+  if (error) throw error
+}
+
+export async function listCartItems(cartId) {
+  const { data, error } = await supabase
+    .from('buyer_cart_items')
+    .select('*')
+    .eq('cart_id', cartId)
+    .order('position')
+  if (error) throw error
+  return data || []
+}
+
+export async function confirmCart(cartId, profile, romaneioUrl) {
+  const { error } = await supabase
+    .from('buyer_carts')
+    .update({
+      status: 'confirmed',
+      confirmed_by: profile.id,
+      confirmed_at: new Date().toISOString(),
+      romaneio_url: romaneioUrl || null,
+    })
+    .eq('id', cartId)
+  if (error) throw error
+}
+
+export async function cancelCart(cartId) {
+  const { error } = await supabase
+    .from('buyer_carts')
+    .update({ status: 'cancelled' })
+    .eq('id', cartId)
+  if (error) throw error
+}
+
