@@ -1184,27 +1184,32 @@ export async function getBuyerCompany(buyerCompanyId) {
 }
 
 // ─── LISTAR PEDREIRAS EXTERNAS (admin e indústria) ──────────────
-export async function listExternalQuarries() {
-  const { data, error } = await supabase
-    .from('external_quarries')
-    .select('*')
-    .order('name')
+export async function listExternalQuarries(profile) {
+  // Filtra por indústria (RLS já garante, mas filtra explicitamente)
+  let q = supabase.from('external_quarries').select('*').order('name')
+  if (profile?.buyer_company_id) {
+    q = q.eq('buyer_company_id', profile.buyer_company_id)
+  }
+  const { data, error } = await q
   if (error) throw error
   return data || []
 }
 
-export async function findOrCreateExternalQuarry(name, extra = {}) {
-  // Busca por nome (case insensitive)
+export async function findOrCreateExternalQuarry(profile, name, extra = {}) {
+  if (!profile?.buyer_company_id) throw new Error('Sem indústria associada')
+  // Busca por nome dentro da própria indústria
   const { data: existing } = await supabase
     .from('external_quarries')
     .select('*')
     .ilike('name', name.trim())
+    .eq('buyer_company_id', profile.buyer_company_id)
     .maybeSingle()
   if (existing) return existing
 
   const { data, error } = await supabase
     .from('external_quarries')
     .insert({
+      buyer_company_id: profile.buyer_company_id,
       name: name.trim(),
       location: extra.location || null,
       contact_phone: extra.contact_phone || null,
@@ -1215,6 +1220,22 @@ export async function findOrCreateExternalQuarry(name, extra = {}) {
     .single()
   if (error) throw error
   return data
+}
+
+export async function updateExternalQuarry(id, payload) {
+  const { error } = await supabase
+    .from('external_quarries')
+    .update(payload)
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function deleteExternalQuarry(id) {
+  const { error } = await supabase
+    .from('external_quarries')
+    .delete()
+    .eq('id', id)
+  if (error) throw error
 }
 
 // ─── BUSCAR BLOCO POR CÓDIGO (em todas as pedreiras) ────────────
@@ -1249,7 +1270,7 @@ export async function loadBuyerCompanyData(profile) {
     supabase.from('external_blocks').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []),
     supabase.from('interest_lists').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []),
     supabase.from('buyer_carts').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []),
-    listExternalQuarries(),
+    listExternalQuarries(profile),
   ])
 
   return {

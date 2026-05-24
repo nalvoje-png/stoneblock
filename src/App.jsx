@@ -5,6 +5,7 @@
 // ═══════════════════════════════════════════════════════════════
 import { useState, useEffect, useCallback, useRef } from 'react'
 import * as api from './api'
+import { supabase } from './supabase'
 
 // ─── CSS ────────────────────────────────────────────────────────
 const CSS = `
@@ -4883,6 +4884,1138 @@ function NotificationsPanel({ profile, notifications, onChange, onClose }) {
 // ═══════════════════════════════════════════════════════════════
 // ADMIN PAGE — Stone Block /admin (gerenciamento de empresas)
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// IND — CONSTANTES E HELPERS COMUNS
+// ═══════════════════════════════════════════════════════════════
+
+// Helper para gerar volume a partir de medidas (igual ao da pedreira)
+function calcVolume(l, h, w) {
+  const lv = parseFloat(l) || 0
+  const hv = parseFloat(h) || 0
+  const wv = parseFloat(w) || 0
+  return lv * hv * wv
+}
+
+// Compressão de foto (igual ao bucket original)
+async function compressIndImage(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const img = new Image()
+      img.onload = () => {
+        const maxDim = 1600
+        let { width, height } = img
+        if (width > height && width > maxDim) {
+          height = (height * maxDim) / width
+          width = maxDim
+        } else if (height > maxDim) {
+          width = (width * maxDim) / height
+          height = maxDim
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0, width, height)
+        canvas.toBlob(
+          (blob) => {
+            const compressed = new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() })
+            resolve(compressed)
+          },
+          'image/jpeg',
+          0.82
+        )
+      }
+      img.src = e.target.result
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND EXTERNAL QUARRIES PAGE — cadastro de pedreiras externas
+// ═══════════════════════════════════════════════════════════════
+function IndExternalQuarriesPage({ profile, buyerData, onChange, toast }) {
+  const quarries = buyerData?.externalQuarries || []
+  const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [search, setSearch] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    name: '', location: '', contact_phone: '', contact_email: '', notes: '',
+  })
+
+  const openNew = () => {
+    setEditing(null)
+    setForm({ name: '', location: '', contact_phone: '', contact_email: '', notes: '' })
+    setShowForm(true)
+  }
+
+  const openEdit = (q) => {
+    setEditing(q)
+    setForm({
+      name: q.name || '',
+      location: q.location || '',
+      contact_phone: q.contact_phone || '',
+      contact_email: q.contact_email || '',
+      notes: q.notes || '',
+    })
+    setShowForm(true)
+  }
+
+  const save = async () => {
+    if (!form.name.trim()) { toast('Nome da pedreira obrigatório.', 'err'); return }
+    setSaving(true)
+    try {
+      if (editing) {
+        await api.updateExternalQuarry(editing.id, {
+          name: form.name.trim(),
+          location: form.location.trim() || null,
+          contact_phone: form.contact_phone.trim() || null,
+          contact_email: form.contact_email.trim() || null,
+          notes: form.notes.trim() || null,
+        })
+        toast('Pedreira atualizada.', 'ok')
+      } else {
+        await api.findOrCreateExternalQuarry(profile, form.name.trim(), {
+          location: form.location.trim(),
+          contact_phone: form.contact_phone.trim(),
+          contact_email: form.contact_email.trim(),
+          notes: form.notes.trim(),
+        })
+        toast('Pedreira cadastrada.', 'ok')
+      }
+      setShowForm(false)
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  const remove = async (q) => {
+    if (!confirm(`Excluir a pedreira "${q.name}"? Isto não afeta blocos já cadastrados.`)) return
+    try {
+      await api.deleteExternalQuarry(q.id)
+      toast('Pedreira excluída.', 'ok')
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const filtered = search
+    ? quarries.filter(q => (q.name || '').toLowerCase().includes(search.toLowerCase()))
+    : quarries
+
+  return (
+    <div>
+      <div className="ph">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="ptit">🏭 Pedreiras Externas</div>
+            <div className="psub">{quarries.length} pedreira(s) cadastrada(s)</div>
+          </div>
+          <button className="btn bb" onClick={openNew}>
+            <Icon n="plus" s={16} c="#fff" /> Nova Pedreira
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <input className="fc" style={{ maxWidth: 320 }} placeholder="🔍 Buscar pedreira..."
+          value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="mtn" s={48} /></div>
+          <div className="estit">{search ? 'Nenhuma pedreira encontrada' : 'Nenhuma pedreira cadastrada ainda'}</div>
+          {!search && <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>Clique em "Nova Pedreira" para começar.</div>}
+        </div>
+      ) : (
+        <div className="card"><div className="tw"><table>
+          <thead><tr>
+            <th>Nome</th><th>Localização</th><th>Contato</th><th>Observações</th><th></th>
+          </tr></thead>
+          <tbody>
+            {filtered.map(q => (
+              <tr key={q.id}>
+                <td style={{ fontWeight: 700 }}>{q.name}</td>
+                <td style={{ fontSize: 13 }}>{q.location || '—'}</td>
+                <td style={{ fontSize: 13 }}>
+                  {q.contact_phone && <div>{q.contact_phone}</div>}
+                  {q.contact_email && <div style={{ color: 'var(--mist)' }}>{q.contact_email}</div>}
+                </td>
+                <td style={{ fontSize: 13, color: 'var(--mist)', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q.notes || '—'}</td>
+                <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  <button className="btn bo bsm" onClick={() => openEdit(q)}>
+                    <Icon n="edit" s={13} /> Editar
+                  </button>
+                  <button className="btn bo bsm" style={{ marginLeft: 6 }} onClick={() => remove(q)}>
+                    <Icon n="trash" s={13} c="var(--err)" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div></div>
+      )}
+
+      {showForm && (
+        <div className="mo" onClick={() => setShowForm(false)}>
+          <div className="md" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div className="mtit">{editing ? '✏️ Editar Pedreira' : '🏭 Nova Pedreira'}</div>
+              <button className="btn bo bsm" onClick={() => setShowForm(false)}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              <div className="fg">
+                <label className="fl">Nome da pedreira *</label>
+                <input className="fc" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Ex: Pedreira do Vale" />
+              </div>
+              <div className="fg">
+                <label className="fl">Localização</label>
+                <input className="fc" value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} placeholder="Cidade / Estado" />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div className="fg">
+                  <label className="fl">Telefone</label>
+                  <input className="fc" value={form.contact_phone} onChange={e => setForm({ ...form, contact_phone: e.target.value })} />
+                </div>
+                <div className="fg">
+                  <label className="fl">E-mail</label>
+                  <input className="fc" type="email" value={form.contact_email} onChange={e => setForm({ ...form, contact_email: e.target.value })} />
+                </div>
+              </div>
+              <div className="fg">
+                <label className="fl">Observações</label>
+                <textarea className="fc" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={3} />
+              </div>
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={() => setShowForm(false)}>Cancelar</button>
+              <button className="btn bb" onClick={save} disabled={saving}>
+                {saving ? <><span className="spinner"></span> Salvando</> : (editing ? 'Salvar' : 'Cadastrar')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND SEARCH BLOCK PAGE — buscar bloco por código em pedreiras Stone Block
+// ═══════════════════════════════════════════════════════════════
+function IndSearchBlockPage({ profile, buyerData, onChange, toast, onCreateExternal }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState(null) // null=ainda não pesquisou, []=sem resultados
+  const [searching, setSearching] = useState(false)
+  const [selectedBlock, setSelectedBlock] = useState(null)
+  const [showInspection, setShowInspection] = useState(false)
+
+  const doSearch = async () => {
+    if (!query.trim()) { toast('Digite o código do bloco.', 'err'); return }
+    setSearching(true)
+    try {
+      const found = await api.searchBlockByCode(query.trim())
+      setResults(found || [])
+    } catch (e) {
+      toast('Erro na busca: ' + e.message, 'err')
+      setResults([])
+    } finally { setSearching(false) }
+  }
+
+  const startInspection = (block) => {
+    setSelectedBlock(block)
+    setShowInspection(true)
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">🔍 Buscar Bloco</div>
+        <div className="psub">Digite o código do bloco que está vendo na pedreira</div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="cb">
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              className="fc"
+              style={{ flex: '1 1 280px', fontSize: 16, padding: '12px 14px', textTransform: 'uppercase' }}
+              placeholder="Ex: P965, VMC45..."
+              value={query}
+              onChange={e => setQuery(e.target.value.toUpperCase())}
+              onKeyDown={e => { if (e.key === 'Enter') doSearch() }}
+              autoFocus
+            />
+            <button className="btn bb" onClick={doSearch} disabled={searching}>
+              {searching ? <><span className="spinner"></span> Buscando</> : <><Icon n="cube" s={16} c="#fff" /> Buscar</>}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {results === null && (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
+          <div className="estit">Digite o código e clique em buscar</div>
+          <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>O sistema busca em todas as pedreiras Stone Block.</div>
+        </div>
+      )}
+
+      {results && results.length === 0 && (
+        <div className="card" style={{ borderTop: '4px solid #f59e0b' }}>
+          <div className="cb" style={{ textAlign: 'center', padding: 32 }}>
+            <div style={{ fontSize: 40, marginBottom: 10 }}>❌</div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>Bloco não encontrado</div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 16 }}>
+              O código <strong>{query}</strong> não está em nenhuma pedreira do Stone Block.
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 16 }}>
+              Provavelmente é uma pedreira que não usa o sistema. Você pode cadastrar este bloco como bloco externo.
+            </div>
+            <button className="btn bb" onClick={() => onCreateExternal && onCreateExternal(query)}>
+              <Icon n="plus" s={15} c="#fff" /> Cadastrar como Bloco Externo
+            </button>
+          </div>
+        </div>
+      )}
+
+      {results && results.length > 0 && (
+        <>
+          <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 12 }}>
+            {results.length} resultado(s) encontrado(s)
+          </div>
+          <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
+            {results.map(b => {
+              const photos = Array.isArray(b.photos) ? b.photos
+                : (typeof b.photos === 'string' ? (b.photos.startsWith('[') ? JSON.parse(b.photos) : [b.photos]) : [])
+              return (
+                <div key={b.id} className="card" style={{ borderTop: '4px solid var(--sap6)' }}>
+                  {photos[0] ? (
+                    <div style={{ position: 'relative' }}>
+                      <img src={photos[0]} alt={b.code} style={{ width: '100%', height: 180, objectFit: 'cover', background: 'var(--haze)', display: 'block' }} />
+                      {photos.length > 1 && (
+                        <div style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,.65)', color: '#fff', padding: '3px 9px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>
+                          📷 {photos.length}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ height: 150, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
+                  )}
+                  <div className="cb">
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{b.code}</div>
+                    <div style={{ fontSize: 13, marginBottom: 4 }}>{b.material}</div>
+                    <div style={{ fontSize: 12, color: 'var(--mist)', marginBottom: 4 }}>Classif. {b.classification} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--sap7)', marginBottom: 10 }}>{money(b.total_value, b.currency)}</div>
+                    <button className="btn bb" style={{ width: '100%' }} onClick={() => startInspection({ ...b, photos })}>
+                      🔎 Iniciar Inspeção
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {showInspection && selectedBlock && (
+        <IndInspectionFormModal
+          profile={profile}
+          block={selectedBlock}
+          onClose={() => { setShowInspection(false); setSelectedBlock(null) }}
+          onSaved={() => { setShowInspection(false); setSelectedBlock(null); onChange && onChange(); toast('Inspeção salva!', 'ok') }}
+          toast={toast}
+        />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND INSPECTION FORM MODAL — formulário de inspeção
+// ═══════════════════════════════════════════════════════════════
+function IndInspectionFormModal({ profile, block, existingInspection, onClose, onSaved, toast }) {
+  const [photos, setPhotos] = useState(existingInspection?.photos || [])
+  const [uploading, setUploading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    notes: existingInspection?.notes || '',
+    negotiated_value: existingInspection?.negotiated_value || '',
+    negotiated_currency: existingInspection?.negotiated_currency || block.currency || 'USD',
+    negotiated_l: existingInspection?.negotiated_l || '',
+    negotiated_h: existingInspection?.negotiated_h || '',
+    negotiated_w: existingInspection?.negotiated_w || '',
+  })
+
+  const handlePhotoUpload = async (e) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+    if (photos.length + files.length > 4) { toast('Máximo 4 fotos de inspeção.', 'err'); return }
+    setUploading(true)
+    try {
+      const uploaded = []
+      for (const f of files) {
+        const compressed = await compressIndImage(f)
+        const url = await api.uploadInspectionPhoto(profile, compressed, block.code)
+        uploaded.push(url)
+      }
+      setPhotos([...photos, ...uploaded])
+    } catch (e) { toast('Erro no upload: ' + e.message, 'err') } finally { setUploading(false); e.target.value = '' }
+  }
+
+  const removePhoto = (idx) => {
+    setPhotos(photos.filter((_, i) => i !== idx))
+  }
+
+  const negotiatedVolume = calcVolume(form.negotiated_l, form.negotiated_h, form.negotiated_w)
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const payload = {
+        original_block_id: block.id,
+        photos,
+        notes: form.notes.trim() || null,
+        negotiated_value: form.negotiated_value ? parseFloat(form.negotiated_value) : null,
+        negotiated_currency: form.negotiated_currency,
+        negotiated_l: form.negotiated_l ? parseFloat(form.negotiated_l) : null,
+        negotiated_h: form.negotiated_h ? parseFloat(form.negotiated_h) : null,
+        negotiated_w: form.negotiated_w ? parseFloat(form.negotiated_w) : null,
+      }
+      if (existingInspection) {
+        await api.updateInspection(existingInspection.id, payload)
+      } else {
+        await api.createInspection(profile, payload)
+      }
+      onSaved && onSaved()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  const officialPhotos = Array.isArray(block.photos) ? block.photos : []
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 1100 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div>
+            <div className="mtit">{existingInspection ? '✏️ Editar Inspeção' : '🔎 Nova Inspeção'} — {block.code}</div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>{block.material}</div>
+          </div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(380px,1fr))', gap: 16 }}>
+            {/* Esquerda: dados da pedreira (read-only) */}
+            <div style={{ background: 'var(--haze)', padding: 14, borderRadius: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 10 }}>
+                📷 Dados oficiais da pedreira
+              </div>
+              <PhotoGallery photos={officialPhotos} height={280} />
+              <div style={{ marginTop: 12, fontSize: 13, lineHeight: 1.7 }}>
+                <div><strong>Código:</strong> {block.code}</div>
+                <div><strong>Material:</strong> {block.material}</div>
+                <div><strong>Classificação:</strong> {block.classification}</div>
+                <div><strong>Volume líquido:</strong> {(block.net_volume || 0).toFixed(2)} m³</div>
+                {block.net_l && <div><strong>Medidas:</strong> {block.net_l} × {block.net_h} × {block.net_w} m</div>}
+                <div><strong>Valor original:</strong> <span style={{ color: 'var(--sap7)', fontWeight: 700 }}>{money(block.total_value, block.currency)}</span></div>
+              </div>
+            </div>
+
+            {/* Direita: campos da inspeção */}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 10 }}>
+                ✍️ Sua inspeção
+              </div>
+
+              {/* Upload de fotos */}
+              <div className="fg">
+                <label className="fl">Fotos de inspeção ({photos.length}/4)</label>
+                {photos.length < 4 && (
+                  <input type="file" accept="image/*" multiple capture="environment" onChange={handlePhotoUpload} disabled={uploading} style={{ fontSize: 13 }} />
+                )}
+                {uploading && <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 4 }}><span className="spinner"></span> Enviando...</div>}
+                {photos.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                    {photos.map((url, i) => (
+                      <div key={i} style={{ position: 'relative' }}>
+                        <img src={url} alt="" style={{ width: 70, height: 70, objectFit: 'cover', borderRadius: 6 }} />
+                        <button onClick={() => removePhoto(i)} style={{ position: 'absolute', top: -6, right: -6, background: 'var(--err)', color: '#fff', border: 'none', width: 20, height: 20, borderRadius: '50%', cursor: 'pointer', fontSize: 11, lineHeight: 1 }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="fg">
+                <label className="fl">Observações internas</label>
+                <textarea className="fc" rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}
+                  placeholder="Ex: pedra excelente, sugiro pedir desconto para 22k" />
+              </div>
+
+              <div style={{ background: 'var(--sap1)', padding: 12, borderRadius: 8, marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--sap7)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                  💰 Valor negociado
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 8 }}>
+                  <select className="fc" value={form.negotiated_currency} onChange={e => setForm({ ...form, negotiated_currency: e.target.value })}>
+                    <option value="USD">USD (US$)</option>
+                    <option value="BRL">BRL (R$)</option>
+                  </select>
+                  <input className="fc" type="number" step="0.01" value={form.negotiated_value} onChange={e => setForm({ ...form, negotiated_value: e.target.value })} placeholder="Ex: 22000.00" />
+                </div>
+              </div>
+
+              <div style={{ background: '#fef3c7', padding: 12, borderRadius: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#854d0e', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                  📐 Medidas negociadas (m)
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                  <input className="fc" type="number" step="0.01" placeholder="L" value={form.negotiated_l} onChange={e => setForm({ ...form, negotiated_l: e.target.value })} />
+                  <input className="fc" type="number" step="0.01" placeholder="H" value={form.negotiated_h} onChange={e => setForm({ ...form, negotiated_h: e.target.value })} />
+                  <input className="fc" type="number" step="0.01" placeholder="W" value={form.negotiated_w} onChange={e => setForm({ ...form, negotiated_w: e.target.value })} />
+                </div>
+                {negotiatedVolume > 0 && (
+                  <div style={{ fontSize: 13, marginTop: 8, color: '#854d0e', fontWeight: 700 }}>
+                    Volume negociado: {negotiatedVolume.toFixed(2)} m³
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose}>Cancelar</button>
+          <button className="btn bb" onClick={save} disabled={saving || uploading}>
+            {saving ? <><span className="spinner"></span> Salvando</> : 'Salvar Inspeção'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND EXTERNAL BLOCK FORM PAGE — cadastrar bloco em pedreira não-Stone Block
+// ═══════════════════════════════════════════════════════════════
+function IndExternalBlockFormPage({ profile, buyerData, onChange, toast, prefillCode, onDone }) {
+  const externalQuarries = buyerData?.externalQuarries || []
+  const [photos, setPhotos] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [showNewQuarryForm, setShowNewQuarryForm] = useState(false)
+  const [newQuarryName, setNewQuarryName] = useState('')
+  const [form, setForm] = useState({
+    external_quarry_id: '',
+    code: (prefillCode || '').toUpperCase(),
+    material: '',
+    classification: 'A',
+    prod_date: new Date().toISOString().slice(0, 10),
+    gross_l: '', gross_h: '', gross_w: '',
+    net_l: '', net_h: '', net_w: '',
+    currency: 'USD',
+    price_m3: '',
+    notes: '',
+  })
+
+  // Cálculos automáticos
+  const grossVolume = calcVolume(form.gross_l, form.gross_h, form.gross_w)
+  const netVolume = calcVolume(form.net_l, form.net_h, form.net_w)
+  const totalValue = netVolume * (parseFloat(form.price_m3) || 0)
+
+  const handlePhotoUpload = async (e) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+    if (photos.length + files.length > 4) { toast('Máximo 4 fotos.', 'err'); return }
+    setUploading(true)
+    try {
+      const uploaded = []
+      for (const f of files) {
+        const compressed = await compressIndImage(f)
+        const url = await api.uploadInspectionPhoto(profile, compressed, form.code || 'external')
+        uploaded.push(url)
+      }
+      setPhotos([...photos, ...uploaded])
+    } catch (e) { toast('Erro no upload: ' + e.message, 'err') } finally { setUploading(false); e.target.value = '' }
+  }
+
+  const removePhoto = (idx) => setPhotos(photos.filter((_, i) => i !== idx))
+
+  const handleCreateQuarry = async () => {
+    if (!newQuarryName.trim()) { toast('Digite o nome.', 'err'); return }
+    try {
+      const q = await api.findOrCreateExternalQuarry(profile, newQuarryName.trim())
+      toast('Pedreira criada.', 'ok')
+      setShowNewQuarryForm(false)
+      setNewQuarryName('')
+      // Aguarda recarregar dados antes de selecionar
+      onChange && (await onChange())
+      setForm(prev => ({ ...prev, external_quarry_id: q.id }))
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const save = async () => {
+    if (!form.external_quarry_id) { toast('Selecione ou cadastre a pedreira.', 'err'); return }
+    if (!form.code.trim()) { toast('Código obrigatório.', 'err'); return }
+    if (!form.material.trim()) { toast('Material obrigatório.', 'err'); return }
+    if (photos.length === 0) { toast('Adicione pelo menos 1 foto.', 'err'); return }
+    setSaving(true)
+    try {
+      await api.createExternalBlock(profile, {
+        external_quarry_id: form.external_quarry_id,
+        code: form.code.trim().toUpperCase(),
+        material: form.material.trim(),
+        classification: form.classification,
+        prod_date: form.prod_date || null,
+        gross_l: parseFloat(form.gross_l) || null,
+        gross_h: parseFloat(form.gross_h) || null,
+        gross_w: parseFloat(form.gross_w) || null,
+        gross_volume: grossVolume || null,
+        net_l: parseFloat(form.net_l) || null,
+        net_h: parseFloat(form.net_h) || null,
+        net_w: parseFloat(form.net_w) || null,
+        net_volume: netVolume || null,
+        currency: form.currency,
+        price_m3: parseFloat(form.price_m3) || null,
+        total_value: totalValue || null,
+        photos,
+        notes: form.notes.trim() || null,
+        status: 'pending',
+      })
+      toast('Bloco externo cadastrado!', 'ok')
+      onChange && onChange()
+      onDone && onDone()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">➕ Cadastrar Bloco Externo</div>
+        <div className="psub">Bloco de pedreira que não usa o Stone Block</div>
+      </div>
+
+      <div className="card">
+        <div className="cb">
+          {/* Pedreira */}
+          <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 10 }}>
+            🏭 Pedreira
+          </div>
+          <div className="fg">
+            <label className="fl">Selecione a pedreira *</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <select className="fc" style={{ flex: 1 }} value={form.external_quarry_id} onChange={e => setForm({ ...form, external_quarry_id: e.target.value })}>
+                <option value="">Selecione...</option>
+                {externalQuarries.map(q => <option key={q.id} value={q.id}>{q.name}{q.location ? ` — ${q.location}` : ''}</option>)}
+              </select>
+              <button className="btn bo bsm" onClick={() => setShowNewQuarryForm(true)}>+ Nova</button>
+            </div>
+            {showNewQuarryForm && (
+              <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+                <input className="fc" placeholder="Nome da nova pedreira" value={newQuarryName} onChange={e => setNewQuarryName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleCreateQuarry() }} />
+                <button className="btn bb bsm" onClick={handleCreateQuarry}>Criar</button>
+                <button className="btn bo bsm" onClick={() => { setShowNewQuarryForm(false); setNewQuarryName('') }}>×</button>
+              </div>
+            )}
+          </div>
+
+          <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginTop: 16, marginBottom: 10, paddingTop: 12, borderTop: '1px solid var(--fog)' }}>
+            📦 Dados do bloco
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div className="fg">
+              <label className="fl">Código *</label>
+              <input className="fc" value={form.code} onChange={e => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="Ex: PV-001" style={{ textTransform: 'uppercase' }} autoCapitalize="characters" />
+            </div>
+            <div className="fg">
+              <label className="fl">Material *</label>
+              <input className="fc" value={form.material} onChange={e => setForm({ ...form, material: e.target.value })} placeholder="Ex: PATAGONIA" />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div className="fg">
+              <label className="fl">Classificação</label>
+              <select className="fc" value={form.classification} onChange={e => setForm({ ...form, classification: e.target.value })}>
+                <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>
+              </select>
+            </div>
+            <div className="fg">
+              <label className="fl">Data de produção</label>
+              <input type="date" className="fc" value={form.prod_date} onChange={e => setForm({ ...form, prod_date: e.target.value })} />
+            </div>
+          </div>
+
+          {/* Medidas */}
+          <div style={{ background: '#f3f4f6', padding: 12, borderRadius: 8, marginTop: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📐 Medidas brutas (m)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+              <input className="fc" type="number" step="0.01" placeholder="L" value={form.gross_l} onChange={e => setForm({ ...form, gross_l: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="H" value={form.gross_h} onChange={e => setForm({ ...form, gross_h: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="W" value={form.gross_w} onChange={e => setForm({ ...form, gross_w: e.target.value })} />
+            </div>
+            {grossVolume > 0 && <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700 }}>Volume bruto: {grossVolume.toFixed(2)} m³</div>}
+          </div>
+
+          <div style={{ background: 'var(--sap1)', padding: 12, borderRadius: 8, marginTop: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--sap7)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📐 Medidas líquidas (m)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+              <input className="fc" type="number" step="0.01" placeholder="L" value={form.net_l} onChange={e => setForm({ ...form, net_l: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="H" value={form.net_h} onChange={e => setForm({ ...form, net_h: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="W" value={form.net_w} onChange={e => setForm({ ...form, net_w: e.target.value })} />
+            </div>
+            {netVolume > 0 && <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700, color: 'var(--sap7)' }}>Volume líquido: {netVolume.toFixed(2)} m³</div>}
+          </div>
+
+          {/* Valor */}
+          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 8, marginTop: 12 }}>
+            <div className="fg">
+              <label className="fl">Moeda</label>
+              <select className="fc" value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}>
+                <option value="USD">USD (US$)</option>
+                <option value="BRL">BRL (R$)</option>
+              </select>
+            </div>
+            <div className="fg">
+              <label className="fl">Preço por m³</label>
+              <input className="fc" type="number" step="0.01" value={form.price_m3} onChange={e => setForm({ ...form, price_m3: e.target.value })} />
+            </div>
+          </div>
+
+          {totalValue > 0 && (
+            <div style={{ padding: 12, background: 'linear-gradient(135deg,#0c1a2e,#1e3a8a)', borderRadius: 8, marginTop: 8 }}>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,.7)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Valor total</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 24, color: '#fff' }}>{money(totalValue, form.currency)}</div>
+            </div>
+          )}
+
+          {/* Fotos */}
+          <div className="fg" style={{ marginTop: 16 }}>
+            <label className="fl">Fotos do bloco ({photos.length}/4) *</label>
+            {photos.length < 4 && (
+              <input type="file" accept="image/*" multiple capture="environment" onChange={handlePhotoUpload} disabled={uploading} style={{ fontSize: 13 }} />
+            )}
+            {uploading && <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 4 }}><span className="spinner"></span> Enviando...</div>}
+            {photos.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                {photos.map((url, i) => (
+                  <div key={i} style={{ position: 'relative' }}>
+                    <img src={url} alt="" style={{ width: 90, height: 90, objectFit: 'cover', borderRadius: 6 }} />
+                    <button onClick={() => removePhoto(i)} style={{ position: 'absolute', top: -6, right: -6, background: 'var(--err)', color: '#fff', border: 'none', width: 20, height: 20, borderRadius: '50%', cursor: 'pointer', fontSize: 11, lineHeight: 1 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="fg">
+            <label className="fl">Observações</label>
+            <textarea className="fc" rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+            {onDone && <button className="btn bo" onClick={onDone}>Cancelar</button>}
+            <button className="btn bb" onClick={save} disabled={saving || uploading}>
+              {saving ? <><span className="spinner"></span> Salvando</> : 'Cadastrar Bloco'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND INSPECTIONS LIST — lista de blocos inspecionados
+// ═══════════════════════════════════════════════════════════════
+function IndInspectionsListPage({ profile, buyerData, onChange, toast }) {
+  const inspections = buyerData?.inspections || []
+  const team = buyerData?.team || []
+  const [originalBlocks, setOriginalBlocks] = useState({})
+  const [detailInspection, setDetailInspection] = useState(null)
+  const [search, setSearch] = useState('')
+  const [filterMarker, setFilterMarker] = useState('')
+
+  // Carrega dados dos blocos originais
+  useEffect(() => {
+    const loadOriginals = async () => {
+      const ids = [...new Set(inspections.map(i => i.original_block_id))]
+      if (ids.length === 0) return
+      try {
+        const map = {}
+        for (const id of ids) {
+          const { data } = await supabase.from('blocks').select('*').eq('id', id).maybeSingle()
+          if (data) {
+            map[id] = {
+              ...data,
+              photos: Array.isArray(data.photos) ? data.photos
+                : (typeof data.photos === 'string' ? (data.photos.startsWith('[') ? JSON.parse(data.photos) : [data.photos]) : []),
+            }
+          }
+        }
+        setOriginalBlocks(map)
+      } catch (e) { console.error('load originals:', e) }
+    }
+    loadOriginals()
+  }, [inspections])
+
+  const filtered = inspections.filter(i => {
+    if (filterMarker && i.marker_id !== filterMarker) return false
+    if (search) {
+      const orig = originalBlocks[i.original_block_id]
+      const code = (orig?.code || '').toLowerCase()
+      if (!code.includes(search.toLowerCase())) return false
+    }
+    return true
+  })
+
+  const remove = async (i) => {
+    if (!confirm('Excluir esta inspeção?')) return
+    try {
+      await api.deleteInspection(i.id)
+      toast('Inspeção excluída.', 'ok')
+      setDetailInspection(null)
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">📦 Blocos Inspecionados</div>
+        <div className="psub">{filtered.length} inspeção(ões) {search || filterMarker ? `de ${inspections.length}` : ''}</div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input className="fc" style={{ flex: '0 1 240px', fontSize: 13, padding: '7px 12px', textTransform: 'uppercase' }} placeholder="🔍 Código do bloco..." value={search} onChange={e => setSearch(e.target.value.toUpperCase())} />
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterMarker} onChange={e => setFilterMarker(e.target.value)}>
+          <option value="">Todos os marcadores</option>
+          {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+        {(search || filterMarker) && (
+          <button className="btn bo bsm" onClick={() => { setSearch(''); setFilterMarker('') }}>
+            <Icon n="x" s={13} /> Limpar
+          </button>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
+          <div className="estit">{inspections.length === 0 ? 'Nenhuma inspeção ainda' : 'Nenhuma inspeção encontrada'}</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
+          {filtered.map(i => {
+            const orig = originalBlocks[i.original_block_id]
+            const marker = team.find(m => m.id === i.marker_id)
+            const cardPhoto = (i.photos && i.photos[0]) || (orig?.photos && orig.photos[0])
+            return (
+              <div key={i.id} className="card" style={{ cursor: 'pointer', borderTop: '4px solid var(--sap6)' }} onClick={() => setDetailInspection({ inspection: i, original: orig, marker })}>
+                {cardPhoto ? (
+                  <div style={{ position: 'relative' }}>
+                    <img src={cardPhoto} alt="" style={{ width: '100%', height: 180, objectFit: 'cover', background: 'var(--haze)', display: 'block' }} />
+                    {i.photos && i.photos.length > 0 && (
+                      <div style={{ position: 'absolute', top: 8, left: 8, background: '#10b981', color: '#fff', padding: '3px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>
+                        ✓ Inspecionado
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ height: 150, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
+                )}
+                <div className="cb">
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{orig?.code || '?'}</div>
+                  <div style={{ fontSize: 13, marginBottom: 6 }}>{orig?.material || '—'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--mist)', marginBottom: 6 }}>
+                    Por <strong>{marker?.name || '—'}</strong> · {fmtDate(i.created_at)}
+                  </div>
+                  {i.negotiated_value && (
+                    <div style={{ fontSize: 13, marginBottom: 4 }}>
+                      <span style={{ color: 'var(--mist)' }}>Original: </span>{money(orig?.total_value, orig?.currency)}<br/>
+                      <span style={{ color: '#059669', fontWeight: 700 }}>Negociado: {money(i.negotiated_value, i.negotiated_currency)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {detailInspection && (
+        <IndInspectionDetailModal
+          profile={profile}
+          inspection={detailInspection.inspection}
+          original={detailInspection.original}
+          marker={detailInspection.marker}
+          onClose={() => setDetailInspection(null)}
+          onEdit={() => {}}
+          onDelete={() => remove(detailInspection.inspection)}
+          onChange={onChange}
+          toast={toast}
+        />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND INSPECTION DETAIL — modal de detalhe (fotos lado a lado)
+// ═══════════════════════════════════════════════════════════════
+function IndInspectionDetailModal({ profile, inspection, original, marker, onClose, onDelete, onChange, toast }) {
+  const [editing, setEditing] = useState(false)
+
+  if (editing) {
+    return (
+      <IndInspectionFormModal
+        profile={profile}
+        block={original}
+        existingInspection={inspection}
+        onClose={() => setEditing(false)}
+        onSaved={() => { setEditing(false); onClose(); onChange && onChange(); toast('Inspeção atualizada!', 'ok') }}
+        toast={toast}
+      />
+    )
+  }
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 1100 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div>
+            <div className="mtit">🔎 Inspeção — {original?.code || '?'}</div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>
+              {original?.material} · Por {marker?.name || '—'} em {fmtDate(inspection.created_at)}
+            </div>
+          </div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(380px,1fr))', gap: 16 }}>
+            {/* Esquerda: pedreira */}
+            <div style={{ background: 'var(--haze)', padding: 14, borderRadius: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 10 }}>
+                📷 Fotos oficiais da pedreira
+              </div>
+              <PhotoGallery photos={original?.photos || []} height={260} />
+              <div style={{ marginTop: 12, fontSize: 13, lineHeight: 1.7 }}>
+                <div><strong>Classif.:</strong> {original?.classification}</div>
+                <div><strong>Volume líquido:</strong> {(original?.net_volume || 0).toFixed(2)} m³</div>
+                {original?.net_l && <div><strong>Medidas:</strong> {original.net_l} × {original.net_h} × {original.net_w} m</div>}
+                <div><strong>Valor original:</strong> <span style={{ color: 'var(--sap7)', fontWeight: 700 }}>{money(original?.total_value, original?.currency)}</span></div>
+              </div>
+            </div>
+
+            {/* Direita: inspeção */}
+            <div style={{ background: '#f0fdf4', padding: 14, borderRadius: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: '#15803d', marginBottom: 10 }}>
+                ✍️ Fotos e dados da inspeção
+              </div>
+              {inspection.photos && inspection.photos.length > 0 ? (
+                <PhotoGallery photos={inspection.photos} height={260} />
+              ) : (
+                <div style={{ height: 200, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8 }}>
+                  <span style={{ color: 'var(--mist)' }}>Sem fotos</span>
+                </div>
+              )}
+              {inspection.notes && (
+                <div style={{ marginTop: 12, background: '#fff', padding: 10, borderRadius: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 4 }}>Observações</div>
+                  <div style={{ fontSize: 13 }}>{inspection.notes}</div>
+                </div>
+              )}
+              {inspection.negotiated_value && (
+                <div style={{ marginTop: 10, fontSize: 13 }}>
+                  <strong>Negociado:</strong> <span style={{ color: '#059669', fontWeight: 700 }}>{money(inspection.negotiated_value, inspection.negotiated_currency)}</span>
+                </div>
+              )}
+              {inspection.negotiated_l && (
+                <div style={{ fontSize: 13 }}>
+                  <strong>Medidas negociadas:</strong> {inspection.negotiated_l} × {inspection.negotiated_h} × {inspection.negotiated_w} m
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onDelete} style={{ color: 'var(--err)' }}>
+            <Icon n="trash" s={14} c="var(--err)" /> Excluir
+          </button>
+          <button className="btn bb" onClick={() => setEditing(true)}>
+            <Icon n="edit" s={14} c="#fff" /> Editar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND EXTERNAL BLOCKS LIST — blocos externos cadastrados
+// ═══════════════════════════════════════════════════════════════
+function IndExternalBlocksListPage({ profile, buyerData, onChange, toast }) {
+  const blocks = buyerData?.externalBlocks || []
+  const team = buyerData?.team || []
+  const quarries = buyerData?.externalQuarries || []
+  const [detailBlock, setDetailBlock] = useState(null)
+  const [search, setSearch] = useState('')
+  const [filterQuarry, setFilterQuarry] = useState('')
+  const [filterMarker, setFilterMarker] = useState('')
+
+  const filtered = blocks.filter(b => {
+    if (filterQuarry && b.external_quarry_id !== filterQuarry) return false
+    if (filterMarker && b.marker_id !== filterMarker) return false
+    if (search && !(b.code || '').toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  })
+
+  const remove = async (b) => {
+    if (!confirm(`Excluir o bloco ${b.code}?`)) return
+    try {
+      await api.deleteExternalBlock(b.id)
+      toast('Bloco excluído.', 'ok')
+      setDetailBlock(null)
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">📍 Blocos Externos</div>
+        <div className="psub">{filtered.length} bloco(s) {(search || filterQuarry || filterMarker) ? `de ${blocks.length}` : ''}</div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input className="fc" style={{ flex: '0 1 200px', fontSize: 13, padding: '7px 12px', textTransform: 'uppercase' }} placeholder="🔍 Código..." value={search} onChange={e => setSearch(e.target.value.toUpperCase())} />
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+          <option value="">Todas as pedreiras</option>
+          {quarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+        </select>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterMarker} onChange={e => setFilterMarker(e.target.value)}>
+          <option value="">Todos os marcadores</option>
+          {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+        {(search || filterQuarry || filterMarker) && (
+          <button className="btn bo bsm" onClick={() => { setSearch(''); setFilterQuarry(''); setFilterMarker('') }}>
+            <Icon n="x" s={13} /> Limpar
+          </button>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
+          <div className="estit">{blocks.length === 0 ? 'Nenhum bloco externo ainda' : 'Nenhum bloco encontrado'}</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
+          {filtered.map(b => {
+            const q = quarries.find(x => x.id === b.external_quarry_id)
+            const m = team.find(x => x.id === b.marker_id)
+            return (
+              <div key={b.id} className="card" style={{ cursor: 'pointer', borderTop: '4px solid #d97706' }} onClick={() => setDetailBlock({ block: b, quarry: q, marker: m })}>
+                {b.photos && b.photos[0] ? (
+                  <div style={{ position: 'relative' }}>
+                    <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 180, objectFit: 'cover', background: 'var(--haze)', display: 'block' }} />
+                    {b.photos.length > 1 && (
+                      <div style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,.65)', color: '#fff', padding: '3px 9px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>📷 {b.photos.length}</div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ height: 150, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
+                )}
+                <div className="cb">
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{b.code}</div>
+                  <div style={{ fontSize: 13, marginBottom: 4 }}>{b.material}</div>
+                  <div style={{ fontSize: 12, color: 'var(--mist)', marginBottom: 4 }}>📍 {q?.name || '—'}</div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 6 }}>{m?.name || '—'} · {fmtDate(b.created_at)}</div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--sap7)' }}>{money(b.total_value, b.currency)}</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {detailBlock && (
+        <IndExternalBlockDetailModal
+          profile={profile}
+          buyerData={buyerData}
+          item={detailBlock}
+          onClose={() => setDetailBlock(null)}
+          onDelete={() => remove(detailBlock.block)}
+          onChange={onChange}
+          toast={toast}
+        />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND EXTERNAL BLOCK DETAIL — modal de detalhe de bloco externo
+// ═══════════════════════════════════════════════════════════════
+function IndExternalBlockDetailModal({ profile, buyerData, item, onClose, onDelete, onChange, toast }) {
+  const { block, quarry, marker } = item
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 800 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div>
+            <div className="mtit">📍 {block.code}</div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>{block.material} · {quarry?.name || '—'}</div>
+          </div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          <PhotoGallery photos={block.photos || []} height={420} />
+
+          <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 10 }}>
+            <div className="sc" style={{ padding: 12 }}>
+              <div className="slbl2">Classificação</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{block.classification}</div>
+            </div>
+            <div className="sc" style={{ padding: 12 }}>
+              <div className="slbl2">Vol. bruto</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{(block.gross_volume || 0).toFixed(2)} m³</div>
+            </div>
+            <div className="sc" style={{ padding: 12 }}>
+              <div className="slbl2">Vol. líquido</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{(block.net_volume || 0).toFixed(2)} m³</div>
+            </div>
+            <div className="sc" style={{ padding: 12, borderTopColor: 'var(--sap5)' }}>
+              <div className="slbl2">Valor</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, color: 'var(--sap7)' }}>{money(block.total_value, block.currency)}</div>
+            </div>
+          </div>
+
+          {block.notes && (
+            <div style={{ marginTop: 14, background: 'var(--haze)', padding: 12, borderRadius: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 4 }}>Observações</div>
+              <div style={{ fontSize: 13 }}>{block.notes}</div>
+            </div>
+          )}
+
+          <div style={{ marginTop: 14, fontSize: 12, color: 'var(--mist)' }}>
+            Cadastrado por <strong>{marker?.name || '—'}</strong> em {fmtDate(block.created_at)}
+          </div>
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onDelete} style={{ color: 'var(--err)' }}>
+            <Icon n="trash" s={14} c="var(--err)" /> Excluir
+          </button>
+          <button className="btn bo" onClick={onClose}>Fechar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AdminPage({ profile, toast }) {
   const [tab, setTab] = useState('buyers') // 'buyers' | 'quarries' | 'externals'
   const [buyers, setBuyers] = useState([])
@@ -5222,12 +6355,11 @@ function AdminPage({ profile, toast }) {
 // ═══════════════════════════════════════════════════════════════
 // IND DASHBOARD — placeholder para Stone Block Ind (etapas seguintes)
 // ═══════════════════════════════════════════════════════════════
-function IndDashboardPage({ profile, buyerData, toast }) {
+function IndDashboardPage({ profile, buyerData, toast, setPage }) {
   if (!buyerData) {
     return <div style={{ padding: 40, textAlign: 'center', color: 'var(--mist)' }}>Carregando dados da indústria...</div>
   }
   const { company, team, inspections, externalBlocks, lists, carts } = buyerData
-  const draftCart = (carts || []).find(c => c.status === 'draft')
   return (
     <div>
       <div className="ph">
@@ -5235,37 +6367,49 @@ function IndDashboardPage({ profile, buyerData, toast }) {
         <div className="psub">{company?.name} · {profile.buyer_role === 'director' ? 'Diretor' : profile.buyer_role === 'buyer' ? 'Comprador' : profile.buyer_role === 'marker' ? 'Marcador' : 'Assistente'}</div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 20 }}>
-        <div className="card"><div className="cb">
-          <div className="slbl2">Blocos Inspecionados</div>
-          <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{inspections?.length || 0}</div>
-        </div></div>
-        <div className="card"><div className="cb">
-          <div className="slbl2">Blocos Externos</div>
-          <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{externalBlocks?.length || 0}</div>
-        </div></div>
-        <div className="card"><div className="cb">
-          <div className="slbl2">Listas de Interesse</div>
-          <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{lists?.length || 0}</div>
-        </div></div>
-        <div className="card"><div className="cb">
-          <div className="slbl2">Carrinhos</div>
-          <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{carts?.length || 0}</div>
-        </div></div>
+      {/* Botão grande de buscar bloco */}
+      <div className="card" style={{ marginBottom: 16, background: 'linear-gradient(135deg, var(--sap6), var(--sap7))', border: 'none', cursor: 'pointer' }} onClick={() => setPage && setPage('ind_search')}>
+        <div className="cb" style={{ textAlign: 'center', padding: 26 }}>
+          <div style={{ fontSize: 36, marginBottom: 6 }}>🔍</div>
+          <div style={{ color: '#fff', fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 22 }}>Buscar Bloco</div>
+          <div style={{ color: 'rgba(255,255,255,.85)', fontSize: 13, marginTop: 4 }}>Comece uma inspeção digitando o código</div>
+        </div>
       </div>
 
-      <div className="card" style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: 18 }}>
-        <div style={{ fontWeight: 700, color: '#854d0e', marginBottom: 8 }}>🚧 Etapa 1 instalada</div>
-        <div style={{ fontSize: 13, color: '#92400e', lineHeight: 1.6 }}>
-          A base do Stone Block Ind está pronta. Em breve você terá:
-          <ul style={{ margin: '8px 0 0 20px' }}>
-            <li>Buscar bloco por código (em pedreiras cadastradas)</li>
-            <li>Cadastrar blocos de pedreiras externas</li>
-            <li>Adicionar fotos de inspeção e observações internas</li>
-            <li>Listas de interesse e carrinhos</li>
-            <li>Confirmação de compra + romaneio em PDF</li>
-          </ul>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 16 }}>
+        <div className="card" style={{ cursor: 'pointer' }} onClick={() => setPage && setPage('ind_inspections')}>
+          <div className="cb">
+            <div className="slbl2">Blocos Inspecionados</div>
+            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{inspections?.length || 0}</div>
+          </div>
         </div>
+        <div className="card" style={{ cursor: 'pointer' }} onClick={() => setPage && setPage('ind_external_blocks')}>
+          <div className="cb">
+            <div className="slbl2">Blocos Externos</div>
+            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{externalBlocks?.length || 0}</div>
+          </div>
+        </div>
+        <div className="card">
+          <div className="cb">
+            <div className="slbl2">Listas de Interesse</div>
+            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{lists?.length || 0}</div>
+          </div>
+        </div>
+        <div className="card">
+          <div className="cb">
+            <div className="slbl2">Carrinhos</div>
+            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{carts?.length || 0}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <button className="btn bo" onClick={() => setPage && setPage('ind_external_form')}>
+          <Icon n="plus" s={15} /> Cadastrar Bloco Externo
+        </button>
+        <button className="btn bo" onClick={() => setPage && setPage('ind_external_quarries')}>
+          <Icon n="mtn" s={15} /> Gerenciar Pedreiras
+        </button>
       </div>
     </div>
   )
@@ -5404,6 +6548,7 @@ export default function App() {
   const [notifOpen,     setNotifOpen]     = useState(false)
   // Stone Block Ind state
   const [buyerData, setBuyerData] = useState(null)
+  const [indPrefillCode, setIndPrefillCode] = useState('')
 
   const showToast = useCallback((msg, type = '') => {
     setToast({ msg, type })
@@ -5582,7 +6727,12 @@ export default function App() {
   // Stone Block Ind users
   if (profile.buyer_company_id) {
     NAV = [
-      { p: 'ind_dashboard', l: 'Dashboard',         i: 'grid' },
+      { p: 'ind_dashboard',         l: 'Dashboard',           i: 'grid' },
+      { p: 'ind_search',            l: 'Buscar Bloco',        i: 'cube' },
+      { p: 'ind_external_form',     l: 'Bloco Externo',       i: 'plus' },
+      { p: 'ind_inspections',       l: 'Blocos Inspecionados', i: 'check' },
+      { p: 'ind_external_blocks',   l: 'Blocos Externos',     i: 'cube' },
+      { p: 'ind_external_quarries', l: 'Pedreiras',           i: 'mtn' },
     ]
   // App admin (rota /admin)
   } else if (profile.is_app_admin && isAdminRoute) {
@@ -5629,8 +6779,13 @@ export default function App() {
 
   const renderPage = () => {
     switch (page) {
-      case 'admin':         return <AdminPage profile={profile} toast={showToast} />
-      case 'ind_dashboard': return <IndDashboardPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
+      case 'admin':                return <AdminPage profile={profile} toast={showToast} />
+      case 'ind_dashboard':        return <IndDashboardPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} setPage={setPage} />
+      case 'ind_search':           return <IndSearchBlockPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} onCreateExternal={(code) => { setIndPrefillCode(code); setPage('ind_external_form') }} />
+      case 'ind_external_form':    return <IndExternalBlockFormPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} prefillCode={indPrefillCode} onDone={() => { setIndPrefillCode(''); setPage('ind_external_blocks') }} />
+      case 'ind_inspections':      return <IndInspectionsListPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
+      case 'ind_external_blocks':  return <IndExternalBlocksListPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
+      case 'ind_external_quarries': return <IndExternalQuarriesPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'dashboard':   return <Dashboard blocks={blocks} quarries={quarries} clients={clients} sales={sales} />
       case 'blocks':      return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
       case 'sales':       return <SalesPage profile={profile} sales={sales} blocks={blocks} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
