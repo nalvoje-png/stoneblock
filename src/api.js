@@ -1073,12 +1073,15 @@ export async function adminCreateBuyerCompany(payload, directorData) {
 
   // 2. Cria o diretor (conta no Auth)
   if (directorData?.email && directorData?.password) {
+    // Passa buyer_company_id e buyer_role no metadata — o trigger handle_new_user
+    // detecta esses campos e cria a profile já configurada como user de indústria.
     const user = await signUpUser(directorData.email, directorData.password, {
       name: directorData.name,
-      role: 'buyer_director',
+      buyer_company_id: company.id,
+      buyer_role: 'director',
     })
     if (user?.id) {
-      // Aguarda trigger criar profile
+      // Aguarda trigger criar profile (já com buyer_company_id e buyer_role corretos)
       let profileExists = false
       for (let i = 0; i < 6; i++) {
         await new Promise(r => setTimeout(r, 500))
@@ -1086,11 +1089,9 @@ export async function adminCreateBuyerCompany(payload, directorData) {
         if (p) { profileExists = true; break }
       }
 
+      // Atualiza apenas o avatar (o resto já veio do trigger).
+      // Não mexe em role / buyer_company_id / buyer_role pra evitar conflito com CHECK constraints.
       const profileData = {
-        role: 'buyer_director',
-        buyer_company_id: company.id,
-        buyer_role: 'director',
-        company_id: null,
         name: directorData.name,
         avatar: directorData.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
       }
@@ -1098,7 +1099,15 @@ export async function adminCreateBuyerCompany(payload, directorData) {
       if (profileExists) {
         await supabase.from('profiles').update(profileData).eq('id', user.id)
       } else {
-        await supabase.from('profiles').insert({ id: user.id, ...profileData })
+        // Fallback: trigger não rodou. Insere manualmente com todos os campos.
+        await supabase.from('profiles').insert({
+          id: user.id,
+          company_id: user.id,
+          role: 'client',
+          buyer_company_id: company.id,
+          buyer_role: 'director',
+          ...profileData,
+        })
       }
     }
   }
