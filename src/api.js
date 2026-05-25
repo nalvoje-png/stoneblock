@@ -1273,6 +1273,18 @@ export async function loadBuyerCompanyData(profile) {
     listExternalQuarries(profile),
   ])
 
+  // Carrega itens das listas
+  let listItems = []
+  if (lists.length > 0) {
+    const listIds = lists.map(l => l.id)
+    const { data: items } = await supabase
+      .from('interest_list_items')
+      .select('*')
+      .in('list_id', listIds)
+      .order('added_at', { ascending: false })
+    listItems = items || []
+  }
+
   return {
     company,
     team,
@@ -1285,6 +1297,7 @@ export async function loadBuyerCompanyData(profile) {
       photos: Array.isArray(b.photos) ? b.photos : (b.photos ? JSON.parse(b.photos) : []),
     })),
     lists,
+    listItems,
     carts,
     externalQuarries,
   }
@@ -1292,12 +1305,14 @@ export async function loadBuyerCompanyData(profile) {
 
 // ─── CRIAR MEMBRO DA EQUIPE DA INDÚSTRIA ────────────────────────
 export async function createBuyerTeamMember(profile, email, password, payload) {
-  // profile = quem está criando (deve ser director ou app_admin)
+  // profile = quem está criando (deve ser director)
   const buyerCompanyId = profile.buyer_company_id
 
   const user = await signUpUser(email, password, {
     name: payload.name,
     role: 'buyer_' + payload.buyer_role,
+    buyer_company_id: buyerCompanyId,
+    buyer_role: payload.buyer_role,
   })
 
   if (user?.id) {
@@ -1316,6 +1331,7 @@ export async function createBuyerTeamMember(profile, email, password, payload) {
       name: payload.name,
       phone: payload.phone || null,
       avatar: payload.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(),
+      is_active: true,
     }
 
     if (profileExists) {
@@ -1328,7 +1344,45 @@ export async function createBuyerTeamMember(profile, email, password, payload) {
   return user
 }
 
-// ─── REMOVER MEMBRO DA EQUIPE DA INDÚSTRIA ──────────────────────
+// ─── EDITAR MEMBRO DA EQUIPE ────────────────────────────────────
+export async function updateBuyerTeamMember(memberId, payload) {
+  const cleanPayload = {}
+  if (payload.name !== undefined) {
+    cleanPayload.name = payload.name
+    cleanPayload.avatar = payload.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()
+  }
+  if (payload.phone !== undefined) cleanPayload.phone = payload.phone || null
+  if (payload.buyer_role !== undefined) {
+    cleanPayload.buyer_role = payload.buyer_role
+    cleanPayload.role = 'buyer_' + payload.buyer_role
+  }
+  const { error } = await supabase
+    .from('profiles')
+    .update(cleanPayload)
+    .eq('id', memberId)
+  if (error) throw error
+  return { id: memberId, ...cleanPayload }
+}
+
+// ─── REVOGAR ACESSO (preserva cadastro) ─────────────────────────
+export async function revokeBuyerTeamMember(memberId) {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ is_active: false })
+    .eq('id', memberId)
+  if (error) throw error
+}
+
+// ─── REATIVAR ACESSO ────────────────────────────────────────────
+export async function reactivateBuyerTeamMember(memberId) {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ is_active: true })
+    .eq('id', memberId)
+  if (error) throw error
+}
+
+// ─── EXCLUIR MEMBRO (perde indústria, vira inactive) ────────────
 export async function removeBuyerTeamMember(memberId) {
   const { error } = await supabase
     .from('profiles')
@@ -1336,9 +1390,31 @@ export async function removeBuyerTeamMember(memberId) {
       buyer_company_id: null,
       buyer_role: null,
       role: 'inactive',
+      is_active: false,
     })
     .eq('id', memberId)
   if (error) throw error
+}
+
+// ─── LISTAS DE INTERESSE — funções extras ───────────────────────
+export async function updateInterestList(id, payload) {
+  const { error } = await supabase
+    .from('interest_lists')
+    .update(payload)
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function listAllItemsByList(buyerCompanyId) {
+  // Retorna todos os itens de todas as listas da indústria
+  const { data, error } = await supabase
+    .from('interest_list_items')
+    .select(`
+      id, list_id, item_type, item_id, added_by, added_at,
+      list:interest_lists!list_id(id, buyer_company_id, name)
+    `)
+  if (error) throw error
+  return (data || []).filter(it => it.list?.buyer_company_id === buyerCompanyId)
 }
 
 // ─── UPLOAD DE FOTO PARA INSPEÇÃO OU BLOCO EXTERNO ──────────────

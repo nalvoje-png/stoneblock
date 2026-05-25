@@ -5748,6 +5748,7 @@ function IndInspectionsListPage({ profile, buyerData, onChange, toast }) {
       {detailInspection && (
         <IndInspectionDetailModal
           profile={profile}
+          buyerData={buyerData}
           inspection={detailInspection.inspection}
           original={detailInspection.original}
           marker={detailInspection.marker}
@@ -5765,8 +5766,9 @@ function IndInspectionsListPage({ profile, buyerData, onChange, toast }) {
 // ═══════════════════════════════════════════════════════════════
 // IND INSPECTION DETAIL — modal de detalhe (fotos lado a lado)
 // ═══════════════════════════════════════════════════════════════
-function IndInspectionDetailModal({ profile, inspection, original, marker, onClose, onDelete, onChange, toast }) {
+function IndInspectionDetailModal({ profile, buyerData, inspection, original, marker, onClose, onDelete, onChange, toast }) {
   const [editing, setEditing] = useState(false)
+  const [showListPicker, setShowListPicker] = useState(false)
 
   if (editing) {
     return (
@@ -5844,11 +5846,25 @@ function IndInspectionDetailModal({ profile, inspection, original, marker, onClo
           <button className="btn bo" onClick={onDelete} style={{ color: 'var(--err)' }}>
             <Icon n="trash" s={14} c="var(--err)" /> Excluir
           </button>
+          <button className="btn bo" onClick={() => setShowListPicker(true)}>
+            ⭐ Adicionar à Lista
+          </button>
           <button className="btn bb" onClick={() => setEditing(true)}>
             <Icon n="edit" s={14} c="#fff" /> Editar
           </button>
         </div>
       </div>
+      {showListPicker && (
+        <AddToListPicker
+          profile={profile}
+          buyerData={buyerData}
+          itemType="inspection"
+          itemId={inspection.id}
+          onClose={() => setShowListPicker(false)}
+          onAdded={() => { setShowListPicker(false); onChange && onChange() }}
+          toast={toast}
+        />
+      )}
     </div>
   )
 }
@@ -5961,6 +5977,7 @@ function IndExternalBlocksListPage({ profile, buyerData, onChange, toast }) {
 // ═══════════════════════════════════════════════════════════════
 function IndExternalBlockDetailModal({ profile, buyerData, item, onClose, onDelete, onChange, toast }) {
   const { block, quarry, marker } = item
+  const [showListPicker, setShowListPicker] = useState(false)
 
   return (
     <div className="mo" onClick={onClose}>
@@ -6009,7 +6026,822 @@ function IndExternalBlockDetailModal({ profile, buyerData, item, onClose, onDele
           <button className="btn bo" onClick={onDelete} style={{ color: 'var(--err)' }}>
             <Icon n="trash" s={14} c="var(--err)" /> Excluir
           </button>
+          <button className="btn bo" onClick={() => setShowListPicker(true)}>
+            ⭐ Adicionar à Lista
+          </button>
           <button className="btn bo" onClick={onClose}>Fechar</button>
+        </div>
+      </div>
+      {showListPicker && (
+        <AddToListPicker
+          profile={profile}
+          buyerData={buyerData}
+          itemType="external"
+          itemId={block.id}
+          onClose={() => setShowListPicker(false)}
+          onAdded={() => { setShowListPicker(false); onChange && onChange() }}
+          toast={toast}
+        />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND TEAM PAGE — gerenciamento de equipe (só diretor)
+// ═══════════════════════════════════════════════════════════════
+function IndTeamPage({ profile, buyerData, onChange, toast }) {
+  const team = buyerData?.team || []
+  const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    name: '', email: '', password: '', phone: '', buyer_role: 'marker',
+  })
+
+  if (profile.buyer_role !== 'director') {
+    return (
+      <div className="es">
+        <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="user" s={48} /></div>
+        <div className="estit">Acesso restrito</div>
+        <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>
+          Apenas o diretor pode gerenciar a equipe.
+        </div>
+      </div>
+    )
+  }
+
+  const openNew = () => {
+    setEditing(null)
+    setForm({ name: '', email: '', password: '', phone: '', buyer_role: 'marker' })
+    setShowForm(true)
+  }
+
+  const openEdit = (m) => {
+    setEditing(m)
+    setForm({
+      name: m.name || '',
+      email: '',
+      password: '',
+      phone: m.phone || '',
+      buyer_role: m.buyer_role || 'marker',
+    })
+    setShowForm(true)
+  }
+
+  const save = async () => {
+    if (!form.name.trim()) { toast('Nome obrigatório.', 'err'); return }
+    if (!editing) {
+      if (!form.email.trim()) { toast('E-mail obrigatório.', 'err'); return }
+      if (!form.password || form.password.length < 6) { toast('Senha mínima 6 caracteres.', 'err'); return }
+    }
+    setSaving(true)
+    try {
+      if (editing) {
+        await api.updateBuyerTeamMember(editing.id, {
+          name: form.name.trim(),
+          phone: form.phone.trim() || null,
+          buyer_role: form.buyer_role,
+        })
+        toast('Membro atualizado.', 'ok')
+      } else {
+        await api.createBuyerTeamMember(profile, form.email.trim(), form.password, {
+          name: form.name.trim(),
+          phone: form.phone.trim() || null,
+          buyer_role: form.buyer_role,
+        })
+        toast('Membro cadastrado!', 'ok')
+      }
+      setShowForm(false)
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  const revoke = async (m) => {
+    if (!confirm(`Revogar o acesso de ${m.name}?\n\nO cadastro será preservado. Você pode reativar depois.`)) return
+    try {
+      await api.revokeBuyerTeamMember(m.id)
+      toast('Acesso revogado.', 'ok')
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const reactivate = async (m) => {
+    try {
+      await api.reactivateBuyerTeamMember(m.id)
+      toast('Acesso reativado.', 'ok')
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const remove = async (m) => {
+    if (!confirm(`EXCLUIR ${m.name} permanentemente?\n\nO histórico de inspeções continuará mostrando o nome, mas o cadastro será apagado e não poderá ser reativado.`)) return
+    try {
+      await api.removeBuyerTeamMember(m.id)
+      toast('Cadastro excluído.', 'ok')
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  // Diretor fica no topo, depois ativos, depois inativos
+  const sorted = [...team].sort((a, b) => {
+    if (a.id === profile.id) return -1
+    if (b.id === profile.id) return 1
+    const ar = a.buyer_role === 'director' ? 0 : 1
+    const br = b.buyer_role === 'director' ? 0 : 1
+    if (ar !== br) return ar - br
+    const aa = a.is_active === false ? 1 : 0
+    const ba = b.is_active === false ? 1 : 0
+    if (aa !== ba) return aa - ba
+    return (a.name || '').localeCompare(b.name || '')
+  })
+
+  const roleLabel = (r) => r === 'director' ? 'Diretor' : r === 'marker' ? 'Marcador' : r === 'assistant' ? 'Assistente' : '—'
+  const roleColor = (r) => r === 'director' ? '#1d4ed8' : r === 'marker' ? '#059669' : '#d97706'
+
+  return (
+    <div>
+      <div className="ph">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="ptit">👥 Equipe</div>
+            <div className="psub">{team.filter(m => m.is_active !== false).length} membro(s) ativo(s) de {team.length}</div>
+          </div>
+          <button className="btn bb" onClick={openNew}>
+            <Icon n="plus" s={16} c="#fff" /> Novo Membro
+          </button>
+        </div>
+      </div>
+
+      {team.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="user" s={48} /></div>
+          <div className="estit">Cadastre membros da equipe</div>
+        </div>
+      ) : (
+        <div className="card"><div className="tw"><table>
+          <thead><tr>
+            <th>Membro</th><th>Papel</th><th>Telefone</th><th>Status</th><th></th>
+          </tr></thead>
+          <tbody>
+            {sorted.map(m => (
+              <tr key={m.id} style={{ opacity: m.is_active === false ? 0.55 : 1 }}>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div className="av" style={{ background: 'var(--sap5)', color: '#fff' }}>{m.avatar || m.name?.substring(0, 2).toUpperCase()}</div>
+                    <div>
+                      <div style={{ fontWeight: 700 }}>{m.name}</div>
+                      {m.id === profile.id && <div style={{ fontSize: 11, color: 'var(--mist)' }}>Você</div>}
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <span className="bdg" style={{ background: roleColor(m.buyer_role) + '20', color: roleColor(m.buyer_role), padding: '4px 10px' }}>
+                    {roleLabel(m.buyer_role)}
+                  </span>
+                </td>
+                <td style={{ fontSize: 13 }}>{m.phone || '—'}</td>
+                <td>
+                  <span className="bdg" style={{ background: m.is_active === false ? '#fee2e2' : '#dcfce7', color: m.is_active === false ? '#991b1b' : '#15803d' }}>
+                    {m.is_active === false ? '🚫 Revogado' : '✓ Ativo'}
+                  </span>
+                </td>
+                <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  {m.id !== profile.id && (
+                    <>
+                      <button className="btn bo bsm" onClick={() => openEdit(m)} title="Editar">
+                        <Icon n="edit" s={13} />
+                      </button>
+                      {m.is_active === false ? (
+                        <button className="btn bo bsm" style={{ marginLeft: 4 }} onClick={() => reactivate(m)} title="Reativar acesso">
+                          ↻ Reativar
+                        </button>
+                      ) : (
+                        <button className="btn bo bsm" style={{ marginLeft: 4 }} onClick={() => revoke(m)} title="Revogar acesso">
+                          🚫 Revogar
+                        </button>
+                      )}
+                      <button className="btn bo bsm" style={{ marginLeft: 4 }} onClick={() => remove(m)} title="Excluir cadastro">
+                        <Icon n="trash" s={13} c="var(--err)" />
+                      </button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div></div>
+      )}
+
+      {showForm && (
+        <div className="mo" onClick={() => setShowForm(false)}>
+          <div className="md" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div className="mtit">{editing ? '✏️ Editar Membro' : '👤 Novo Membro'}</div>
+              <button className="btn bo bsm" onClick={() => setShowForm(false)}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              <div className="fg">
+                <label className="fl">Nome *</label>
+                <input className="fc" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Nome completo" />
+              </div>
+              {!editing && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div className="fg">
+                    <label className="fl">E-mail *</label>
+                    <input className="fc" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="usuario@empresa.com" />
+                  </div>
+                  <div className="fg">
+                    <label className="fl">Senha *</label>
+                    <input className="fc" type="text" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Mínimo 6 caracteres" />
+                  </div>
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div className="fg">
+                  <label className="fl">Telefone</label>
+                  <input className="fc" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
+                </div>
+                <div className="fg">
+                  <label className="fl">Papel *</label>
+                  <select className="fc" value={form.buyer_role} onChange={e => setForm({ ...form, buyer_role: e.target.value })}>
+                    <option value="marker">Marcador</option>
+                    <option value="assistant">Assistente</option>
+                    <option value="director">Diretor</option>
+                  </select>
+                </div>
+              </div>
+              {!editing && (
+                <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 8, lineHeight: 1.5 }}>
+                  📋 Anote o e-mail e senha — você precisará passar para o membro acessar o sistema.
+                </div>
+              )}
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={() => setShowForm(false)}>Cancelar</button>
+              <button className="btn bb" onClick={save} disabled={saving}>
+                {saving ? <><span className="spinner"></span> Salvando</> : (editing ? 'Salvar' : 'Cadastrar')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND LISTS PAGE — listas de interesse (todas as listas)
+// ═══════════════════════════════════════════════════════════════
+function IndListsPage({ profile, buyerData, onChange, toast, setPage, setSelectedListId }) {
+  const lists = buyerData?.lists || []
+  const listItems = buyerData?.listItems || []
+  const team = buyerData?.team || []
+  const [showForm, setShowForm] = useState(false)
+  const [newListName, setNewListName] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const create = async () => {
+    if (!newListName.trim()) { toast('Digite o nome da lista.', 'err'); return }
+    setSaving(true)
+    try {
+      const list = await api.createInterestList(profile, newListName.trim())
+      toast('Lista criada!', 'ok')
+      setShowForm(false)
+      setNewListName('')
+      onChange && (await onChange())
+      // Abre a lista direto
+      if (list?.id && setSelectedListId && setPage) {
+        setSelectedListId(list.id)
+        setPage('ind_list_detail')
+      }
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  const remove = async (l) => {
+    if (!confirm(`Excluir a lista "${l.name}"?\n\nOs blocos não são apagados, apenas a lista.`)) return
+    try {
+      await api.deleteList(l.id)
+      toast('Lista excluída.', 'ok')
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const open = (l) => {
+    if (setSelectedListId && setPage) {
+      setSelectedListId(l.id)
+      setPage('ind_list_detail')
+    }
+  }
+
+  // Conta itens por lista
+  const itemsCount = (listId) => listItems.filter(it => it.list_id === listId).length
+
+  return (
+    <div>
+      <div className="ph">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="ptit">⭐ Listas de Interesse</div>
+            <div className="psub">{lists.length} lista(s) cadastrada(s)</div>
+          </div>
+          <button className="btn bb" onClick={() => setShowForm(true)}>
+            <Icon n="plus" s={16} c="#fff" /> Nova Lista
+          </button>
+        </div>
+      </div>
+
+      {lists.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="check" s={48} /></div>
+          <div className="estit">Nenhuma lista criada</div>
+          <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>
+            Crie listas para organizar blocos por visita, por interesse ou por estratégia.
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
+          {lists.map(l => {
+            const creator = team.find(t => t.id === l.created_by)
+            const count = itemsCount(l.id)
+            return (
+              <div key={l.id} className="card" style={{ cursor: 'pointer', borderTop: '4px solid var(--warn)' }} onClick={() => open(l)}>
+                <div className="cb">
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
+                    <div style={{ fontSize: 32 }}>⭐</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{l.name}</div>
+                      <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 2 }}>
+                        {count} bloco(s)
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)' }}>
+                    Por <strong>{creator?.name || '—'}</strong> em {fmtDate(l.created_at)}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                    <button className="btn bb bsm" style={{ flex: 1 }} onClick={(e) => { e.stopPropagation(); open(l) }}>
+                      Abrir
+                    </button>
+                    <button className="btn bo bsm" onClick={(e) => { e.stopPropagation(); remove(l) }} title="Excluir">
+                      <Icon n="trash" s={13} c="var(--err)" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {showForm && (
+        <div className="mo" onClick={() => setShowForm(false)}>
+          <div className="md" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div className="mtit">⭐ Nova Lista</div>
+              <button className="btn bo bsm" onClick={() => setShowForm(false)}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              <div className="fg">
+                <label className="fl">Nome da lista *</label>
+                <input className="fc" value={newListName} onChange={e => setNewListName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') create() }}
+                  placeholder="Ex: Visita Pedreira Holz 22/05" autoFocus />
+              </div>
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={() => setShowForm(false)}>Cancelar</button>
+              <button className="btn bb" onClick={create} disabled={saving}>
+                {saving ? <><span className="spinner"></span> Criando</> : 'Criar Lista'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND LIST DETAIL PAGE — uma lista específica com seus blocos
+// ═══════════════════════════════════════════════════════════════
+function IndListDetailPage({ profile, buyerData, onChange, toast, listId, setPage }) {
+  const lists = buyerData?.lists || []
+  const listItems = buyerData?.listItems || []
+  const inspections = buyerData?.inspections || []
+  const externalBlocks = buyerData?.externalBlocks || []
+  const team = buyerData?.team || []
+  const externalQuarries = buyerData?.externalQuarries || []
+  const [showAdd, setShowAdd] = useState(false)
+  const [originalBlocks, setOriginalBlocks] = useState({})
+
+  const list = lists.find(l => l.id === listId)
+  const itemsHere = listItems.filter(it => it.list_id === listId)
+
+  // Carrega blocos originais das inspeções (precisamos das fotos/dados da pedreira)
+  useEffect(() => {
+    const inspIds = itemsHere.filter(it => it.item_type === 'inspection').map(it => it.item_id)
+    const blockOriginalIds = inspections.filter(i => inspIds.includes(i.id)).map(i => i.original_block_id)
+    const uniqueIds = [...new Set(blockOriginalIds)]
+    if (uniqueIds.length === 0) return
+    ;(async () => {
+      const map = {}
+      for (const id of uniqueIds) {
+        try {
+          const { data } = await supabase.from('blocks').select('*').eq('id', id).maybeSingle()
+          if (data) {
+            map[id] = {
+              ...data,
+              photos: Array.isArray(data.photos) ? data.photos
+                : (typeof data.photos === 'string' ? (data.photos.startsWith('[') ? JSON.parse(data.photos) : [data.photos]) : []),
+            }
+          }
+        } catch (e) { console.error(e) }
+      }
+      setOriginalBlocks(map)
+    })()
+  }, [listId, inspections.length])
+
+  if (!list) {
+    return (
+      <div className="es">
+        <div className="estit">Lista não encontrada</div>
+        <button className="btn bb" style={{ marginTop: 16 }} onClick={() => setPage && setPage('ind_lists')}>← Voltar para listas</button>
+      </div>
+    )
+  }
+
+  const removeItem = async (it) => {
+    if (!confirm('Remover este bloco da lista?')) return
+    try {
+      await api.removeListItem(it.id)
+      toast('Bloco removido da lista.', 'ok')
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const removeList = async () => {
+    if (!confirm(`Excluir a lista "${list.name}"?\n\nOs blocos não são apagados, apenas a lista.`)) return
+    try {
+      await api.deleteList(list.id)
+      toast('Lista excluída.', 'ok')
+      onChange && (await onChange())
+      setPage && setPage('ind_lists')
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const creator = team.find(t => t.id === list.created_by)
+
+  return (
+    <div>
+      <div className="ph">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <button className="btn bo bsm" style={{ marginBottom: 8 }} onClick={() => setPage && setPage('ind_lists')}>← Listas</button>
+            <div className="ptit">⭐ {list.name}</div>
+            <div className="psub">
+              {itemsHere.length} bloco(s) · Criada por {creator?.name || '—'} em {fmtDate(list.created_at)}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn bb" onClick={() => setShowAdd(true)}>
+              <Icon n="plus" s={15} c="#fff" /> Adicionar Blocos
+            </button>
+            <button className="btn bo" onClick={removeList}>
+              <Icon n="trash" s={14} c="var(--err)" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {itemsHere.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
+          <div className="estit">Lista vazia</div>
+          <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>Clique em "Adicionar Blocos" para começar.</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
+          {itemsHere.map(it => {
+            let block, code, material, photo, valor, currency, badge, badgeColor
+            if (it.item_type === 'inspection') {
+              const insp = inspections.find(i => i.id === it.item_id)
+              const orig = insp ? originalBlocks[insp.original_block_id] : null
+              block = insp
+              code = orig?.code || '?'
+              material = orig?.material || '—'
+              photo = (insp?.photos && insp.photos[0]) || (orig?.photos && orig.photos[0])
+              valor = insp?.negotiated_value || orig?.total_value
+              currency = insp?.negotiated_currency || orig?.currency
+              badge = '🔎 Inspeção'
+              badgeColor = 'var(--sap6)'
+            } else {
+              const ext = externalBlocks.find(b => b.id === it.item_id)
+              block = ext
+              code = ext?.code || '?'
+              material = ext?.material || '—'
+              photo = ext?.photos && ext.photos[0]
+              valor = ext?.total_value
+              currency = ext?.currency
+              badge = '📍 Externo'
+              badgeColor = '#d97706'
+            }
+            return (
+              <div key={it.id} className="card" style={{ borderTop: `4px solid ${badgeColor}` }}>
+                {photo ? (
+                  <img src={photo} alt={code} style={{ width: '100%', height: 160, objectFit: 'cover', background: 'var(--haze)', display: 'block' }} />
+                ) : (
+                  <div style={{ height: 140, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
+                )}
+                <div className="cb">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{code}</div>
+                    <span className="bdg" style={{ background: badgeColor + '20', color: badgeColor, fontSize: 10, padding: '2px 6px' }}>{badge}</span>
+                  </div>
+                  <div style={{ fontSize: 13, marginBottom: 6 }}>{material}</div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14, color: 'var(--sap7)', marginBottom: 10 }}>
+                    {valor ? money(valor, currency) : '—'}
+                  </div>
+                  <button className="btn bo bsm" style={{ width: '100%' }} onClick={() => removeItem(it)}>
+                    <Icon n="x" s={13} /> Remover da lista
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {showAdd && (
+        <AddBlocksToListModal
+          profile={profile}
+          buyerData={buyerData}
+          listId={listId}
+          existingItemIds={itemsHere.map(it => ({ type: it.item_type, id: it.item_id }))}
+          onClose={() => setShowAdd(false)}
+          onAdded={() => { setShowAdd(false); onChange && onChange(); toast('Blocos adicionados.', 'ok') }}
+          toast={toast}
+        />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ADD BLOCKS TO LIST MODAL — seletor de blocos
+// ═══════════════════════════════════════════════════════════════
+function AddBlocksToListModal({ profile, buyerData, listId, existingItemIds, onClose, onAdded, toast }) {
+  const inspections = buyerData?.inspections || []
+  const externalBlocks = buyerData?.externalBlocks || []
+  const [selected, setSelected] = useState(new Set())
+  const [search, setSearch] = useState('')
+  const [originalBlocks, setOriginalBlocks] = useState({})
+  const [saving, setSaving] = useState(false)
+  const [tab, setTab] = useState('inspections') // 'inspections' | 'external'
+
+  useEffect(() => {
+    const ids = [...new Set(inspections.map(i => i.original_block_id))]
+    if (ids.length === 0) return
+    ;(async () => {
+      const map = {}
+      for (const id of ids) {
+        try {
+          const { data } = await supabase.from('blocks').select('id, code, material, photos').eq('id', id).maybeSingle()
+          if (data) map[id] = data
+        } catch (e) {}
+      }
+      setOriginalBlocks(map)
+    })()
+  }, [inspections.length])
+
+  const isAlready = (type, id) => existingItemIds.some(e => e.type === type && e.id === id)
+
+  const toggleSel = (type, id) => {
+    const key = `${type}:${id}`
+    const ns = new Set(selected)
+    if (ns.has(key)) ns.delete(key)
+    else ns.add(key)
+    setSelected(ns)
+  }
+
+  const filteredInspections = inspections.filter(i => {
+    if (isAlready('inspection', i.id)) return false
+    if (!search) return true
+    const orig = originalBlocks[i.original_block_id]
+    return (orig?.code || '').toLowerCase().includes(search.toLowerCase())
+  })
+
+  const filteredExternal = externalBlocks.filter(b => {
+    if (isAlready('external', b.id)) return false
+    if (!search) return true
+    return (b.code || '').toLowerCase().includes(search.toLowerCase())
+  })
+
+  const save = async () => {
+    if (selected.size === 0) { toast('Selecione ao menos 1 bloco.', 'err'); return }
+    setSaving(true)
+    try {
+      for (const key of selected) {
+        const [type, id] = key.split(':')
+        await api.addListItem(listId, type, id, profile)
+      }
+      onAdded && onAdded()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 760 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div className="mtit">➕ Adicionar Blocos à Lista</div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          <input className="fc" style={{ marginBottom: 10, textTransform: 'uppercase' }} placeholder="🔍 Buscar por código..." value={search} onChange={e => setSearch(e.target.value.toUpperCase())} />
+
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12, borderBottom: '1px solid var(--fog)', paddingBottom: 8 }}>
+            <button className={'btn ' + (tab === 'inspections' ? 'bb' : 'bo') + ' bsm'} onClick={() => setTab('inspections')}>
+              🔎 Inspeções ({filteredInspections.length})
+            </button>
+            <button className={'btn ' + (tab === 'external' ? 'bb' : 'bo') + ' bsm'} onClick={() => setTab('external')}>
+              📍 Externos ({filteredExternal.length})
+            </button>
+          </div>
+
+          {tab === 'inspections' && (
+            filteredInspections.length === 0 ? (
+              <div style={{ padding: 20, textAlign: 'center', color: 'var(--mist)' }}>Nenhuma inspeção disponível para adicionar.</div>
+            ) : (
+              <div style={{ display: 'grid', gap: 8 }}>
+                {filteredInspections.map(i => {
+                  const orig = originalBlocks[i.original_block_id]
+                  const photo = (i.photos && i.photos[0]) || (orig?.photos && (Array.isArray(orig.photos) ? orig.photos[0] : null))
+                  const key = `inspection:${i.id}`
+                  const sel = selected.has(key)
+                  return (
+                    <label key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, background: sel ? 'var(--sap1)' : 'var(--haze)', borderRadius: 8, cursor: 'pointer', border: sel ? '2px solid var(--sap6)' : '2px solid transparent' }}>
+                      <input type="checkbox" checked={sel} onChange={() => toggleSel('inspection', i.id)} />
+                      {photo && <img src={photo} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 6 }} />}
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700 }}>{orig?.code || '?'} <span className="bdg" style={{ background: 'var(--sap1)', color: 'var(--sap7)', marginLeft: 6 }}>Inspeção</span></div>
+                        <div style={{ fontSize: 12, color: 'var(--mist)' }}>{orig?.material || '—'}</div>
+                      </div>
+                      <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, color: 'var(--sap7)' }}>
+                        {money(i.negotiated_value || orig?.total_value, i.negotiated_currency || orig?.currency)}
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
+            )
+          )}
+
+          {tab === 'external' && (
+            filteredExternal.length === 0 ? (
+              <div style={{ padding: 20, textAlign: 'center', color: 'var(--mist)' }}>Nenhum bloco externo disponível para adicionar.</div>
+            ) : (
+              <div style={{ display: 'grid', gap: 8 }}>
+                {filteredExternal.map(b => {
+                  const photo = b.photos && b.photos[0]
+                  const key = `external:${b.id}`
+                  const sel = selected.has(key)
+                  return (
+                    <label key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, background: sel ? '#fef3c7' : 'var(--haze)', borderRadius: 8, cursor: 'pointer', border: sel ? '2px solid #d97706' : '2px solid transparent' }}>
+                      <input type="checkbox" checked={sel} onChange={() => toggleSel('external', b.id)} />
+                      {photo && <img src={photo} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 6 }} />}
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700 }}>{b.code} <span className="bdg" style={{ background: '#fef3c7', color: '#d97706', marginLeft: 6 }}>Externo</span></div>
+                        <div style={{ fontSize: 12, color: 'var(--mist)' }}>{b.material}</div>
+                      </div>
+                      <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, color: 'var(--sap7)' }}>
+                        {money(b.total_value, b.currency)}
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
+            )
+          )}
+
+          {selected.size > 0 && (
+            <div style={{ marginTop: 12, padding: 10, background: 'var(--sap1)', borderRadius: 8, fontSize: 13, color: 'var(--sap7)', fontWeight: 600 }}>
+              ✓ {selected.size} bloco(s) selecionado(s)
+            </div>
+          )}
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose}>Cancelar</button>
+          <button className="btn bb" onClick={save} disabled={saving || selected.size === 0}>
+            {saving ? <><span className="spinner"></span> Adicionando</> : `Adicionar ${selected.size > 0 ? `(${selected.size})` : ''}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ADD TO LIST PICKER — pequeno modal pra adicionar 1 bloco a 1+ listas
+// ═══════════════════════════════════════════════════════════════
+function AddToListPicker({ profile, buyerData, itemType, itemId, onClose, onAdded, toast }) {
+  const lists = buyerData?.lists || []
+  const listItems = buyerData?.listItems || []
+  const [showNew, setShowNew] = useState(false)
+  const [newListName, setNewListName] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  // Lista das listas em que esse bloco JÁ está
+  const inLists = new Set(
+    listItems.filter(it => it.item_type === itemType && it.item_id === itemId).map(it => it.list_id)
+  )
+
+  const addToList = async (listId) => {
+    setSaving(true)
+    try {
+      await api.addListItem(listId, itemType, itemId, profile)
+      toast('Adicionado!', 'ok')
+      onAdded && onAdded()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  const removeFromList = async (listId) => {
+    setSaving(true)
+    try {
+      const it = listItems.find(x => x.list_id === listId && x.item_type === itemType && x.item_id === itemId)
+      if (it) {
+        await api.removeListItem(it.id)
+        toast('Removido da lista.', 'ok')
+        onAdded && onAdded()
+      }
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  const createAndAdd = async () => {
+    if (!newListName.trim()) { toast('Digite o nome.', 'err'); return }
+    setSaving(true)
+    try {
+      const list = await api.createInterestList(profile, newListName.trim())
+      await api.addListItem(list.id, itemType, itemId, profile)
+      toast('Lista criada e bloco adicionado!', 'ok')
+      setShowNew(false)
+      setNewListName('')
+      onAdded && onAdded()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="mo" onClick={onClose} style={{ zIndex: 1100 }}>
+      <div className="md" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div className="mtit">⭐ Adicionar à Lista</div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          {lists.length === 0 && !showNew && (
+            <div style={{ padding: 14, textAlign: 'center', color: 'var(--mist)', fontSize: 13 }}>
+              Você ainda não tem listas. Crie uma nova!
+            </div>
+          )}
+
+          {lists.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+              {lists.map(l => {
+                const inIt = inLists.has(l.id)
+                return (
+                  <div key={l.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 10, background: inIt ? 'var(--sap1)' : 'var(--haze)', borderRadius: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700 }}>{l.name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--mist)' }}>{fmtDate(l.created_at)}</div>
+                    </div>
+                    {inIt ? (
+                      <button className="btn bo bsm" disabled={saving} onClick={() => removeFromList(l.id)}>
+                        ✓ Na lista — Remover
+                      </button>
+                    ) : (
+                      <button className="btn bb bsm" disabled={saving} onClick={() => addToList(l.id)}>
+                        + Adicionar
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {showNew ? (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input className="fc" placeholder="Nome da nova lista..." value={newListName} onChange={e => setNewListName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') createAndAdd() }} autoFocus />
+              <button className="btn bb bsm" disabled={saving} onClick={createAndAdd}>
+                {saving ? <span className="spinner"></span> : 'Criar e Adicionar'}
+              </button>
+              <button className="btn bo bsm" onClick={() => { setShowNew(false); setNewListName('') }}>×</button>
+            </div>
+          ) : (
+            <button className="btn bo" style={{ width: '100%' }} onClick={() => setShowNew(true)}>
+              <Icon n="plus" s={14} /> Criar Nova Lista
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -6549,6 +7381,7 @@ export default function App() {
   // Stone Block Ind state
   const [buyerData, setBuyerData] = useState(null)
   const [indPrefillCode, setIndPrefillCode] = useState('')
+  const [selectedListId, setSelectedListId] = useState(null)
 
   const showToast = useCallback((msg, type = '') => {
     setToast({ msg, type })
@@ -6627,6 +7460,12 @@ export default function App() {
           try {
             const p = await api.ensureProfile(session.user.id, session.user.email)
             if (!mounted) return
+            // Bloqueia usuários revogados
+            if (p && p.is_active === false) {
+              console.log('User revoked, signing out')
+              try { await api.signOut() } catch (e) {}
+              return
+            }
             console.log('Profile loaded')
             setProfile(p)
             // Load data in background — don't wait
@@ -6684,14 +7523,22 @@ export default function App() {
   // Handler for successful login - called by LoginPage directly
   const handleLoginSuccess = useCallback(async (newProfile) => {
     console.log('Login success, setting profile')
+    // Bloqueia usuários revogados
+    if (newProfile && newProfile.is_active === false) {
+      showToast('Seu acesso foi revogado. Entre em contato com o diretor da empresa.', 'err')
+      try { await api.signOut() } catch (e) { console.error(e) }
+      return
+    }
     setProfile(newProfile)
     loadData(newProfile).catch(err => console.error('loadData:', err))
-  }, [loadData])
+  }, [loadData, showToast])
 
   const handleLogout = async () => {
     try { await api.signOut() } catch (e) { console.error(e) }
     setProfile(null)
     setBuyerData(null)
+    setSelectedListId(null)
+    setIndPrefillCode('')
     setBlocks([]); setQuarries([]); setClients([]); setPayments([]); setSales([])
     setTeam([]); setReleases([]); setCatalog([]); setOrders([]); setNotifications([]); setFavorites([])
   }
@@ -6732,8 +7579,12 @@ export default function App() {
       { p: 'ind_external_form',     l: 'Bloco Externo',       i: 'plus' },
       { p: 'ind_inspections',       l: 'Blocos Inspecionados', i: 'check' },
       { p: 'ind_external_blocks',   l: 'Blocos Externos',     i: 'cube' },
+      { p: 'ind_lists',             l: 'Listas de Interesse', i: 'check' },
       { p: 'ind_external_quarries', l: 'Pedreiras',           i: 'mtn' },
     ]
+    if (profile.buyer_role === 'director') {
+      NAV.push({ p: 'ind_team', l: 'Equipe', i: 'user' })
+    }
   // App admin (rota /admin)
   } else if (profile.is_app_admin && isAdminRoute) {
     NAV = [
@@ -6786,6 +7637,9 @@ export default function App() {
       case 'ind_inspections':      return <IndInspectionsListPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'ind_external_blocks':  return <IndExternalBlocksListPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'ind_external_quarries': return <IndExternalQuarriesPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
+      case 'ind_team':              return <IndTeamPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
+      case 'ind_lists':             return <IndListsPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} setPage={setPage} setSelectedListId={setSelectedListId} />
+      case 'ind_list_detail':       return <IndListDetailPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} listId={selectedListId} setPage={setPage} />
       case 'dashboard':   return <Dashboard blocks={blocks} quarries={quarries} clients={clients} sales={sales} />
       case 'blocks':      return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
       case 'sales':       return <SalesPage profile={profile} sales={sales} blocks={blocks} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
