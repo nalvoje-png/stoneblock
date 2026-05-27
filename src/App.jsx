@@ -5243,6 +5243,11 @@ function IndInspectionFormModal({ profile, block, existingInspection, inspection
     notes: existingInspection?.notes || '',
     negotiated_value: existingInspection?.negotiated_value || '',
     negotiated_currency: existingInspection?.negotiated_currency || block.currency || 'USD',
+    // Medidas brutas
+    negotiated_gross_l: existingInspection?.negotiated_gross_l || '',
+    negotiated_gross_h: existingInspection?.negotiated_gross_h || '',
+    negotiated_gross_w: existingInspection?.negotiated_gross_w || '',
+    // Medidas líquidas
     negotiated_l: existingInspection?.negotiated_l || '',
     negotiated_h: existingInspection?.negotiated_h || '',
     negotiated_w: existingInspection?.negotiated_w || '',
@@ -5268,7 +5273,8 @@ function IndInspectionFormModal({ profile, block, existingInspection, inspection
     setPhotos(photos.filter((_, i) => i !== idx))
   }
 
-  const negotiatedVolume = calcVolume(form.negotiated_l, form.negotiated_h, form.negotiated_w)
+  const negotiatedGrossVolume = calcVolume(form.negotiated_gross_l, form.negotiated_gross_h, form.negotiated_gross_w)
+  const negotiatedNetVolume = calcVolume(form.negotiated_l, form.negotiated_h, form.negotiated_w)
 
   const save = async () => {
     setSaving(true)
@@ -5280,20 +5286,34 @@ function IndInspectionFormModal({ profile, block, existingInspection, inspection
         notes: form.notes.trim() || null,
         negotiated_value: form.negotiated_value ? parseFloat(form.negotiated_value) : null,
         negotiated_currency: form.negotiated_currency,
+        negotiated_gross_l: form.negotiated_gross_l ? parseFloat(form.negotiated_gross_l) : null,
+        negotiated_gross_h: form.negotiated_gross_h ? parseFloat(form.negotiated_gross_h) : null,
+        negotiated_gross_w: form.negotiated_gross_w ? parseFloat(form.negotiated_gross_w) : null,
         negotiated_l: form.negotiated_l ? parseFloat(form.negotiated_l) : null,
         negotiated_h: form.negotiated_h ? parseFloat(form.negotiated_h) : null,
         negotiated_w: form.negotiated_w ? parseFloat(form.negotiated_w) : null,
       }
       if (existingInspection) {
         await api.updateInspection(existingInspection.id, payload)
+        toast('Inspeção atualizada!', 'ok')
       } else {
-        await api.createInspection(profile, payload)
+        const result = await api.createInspection(profile, payload)
+        if (!result) throw new Error('Falha ao criar inspeção')
+        toast('Bloco inspecionado!', 'ok')
       }
-      onSaved && onSaved()
-    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+      // Garante que a tela de origem recarregue os dados antes de fechar
+      if (onSaved) await onSaved()
+    } catch (e) { 
+      console.error('Erro ao salvar inspeção:', e)
+      toast('Erro: ' + e.message, 'err')
+    } finally { 
+      setSaving(false) 
+    }
   }
 
   const officialPhotos = Array.isArray(block.photos) ? block.photos : []
+  // Preço por m³ original
+  const originalPriceM3 = block.price_m3 || (block.net_volume > 0 ? (block.total_value / block.net_volume) : 0)
 
   return (
     <div className="mo" onClick={onClose}>
@@ -5307,19 +5327,57 @@ function IndInspectionFormModal({ profile, block, existingInspection, inspection
         </div>
         <div className="mbody">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(380px,1fr))', gap: 16 }}>
-            {/* Esquerda: dados da pedreira (read-only) */}
+            {/* Esquerda: dados oficiais da pedreira */}
             <div style={{ background: 'var(--haze)', padding: 14, borderRadius: 10 }}>
               <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 10 }}>
                 📷 Dados oficiais da pedreira
               </div>
               <PhotoGallery photos={officialPhotos} height={280} />
+              
+              {/* Informações básicas */}
               <div style={{ marginTop: 12, fontSize: 13, lineHeight: 1.7 }}>
-                <div><strong>Código:</strong> {block.code}</div>
+                <div><strong>Código:</strong> {block.code}{block.sys_code ? ` (${block.sys_code})` : ''}</div>
                 <div><strong>Material:</strong> {block.material}</div>
                 <div><strong>Classificação:</strong> {block.classification}</div>
-                <div><strong>Volume líquido:</strong> {(block.net_volume || 0).toFixed(2)} m³</div>
-                {block.net_l && <div><strong>Medidas:</strong> {block.net_l} × {block.net_h} × {block.net_w} m</div>}
-                <div><strong>Valor original:</strong> <span style={{ color: 'var(--sap7)', fontWeight: 700 }}>{money(block.total_value, block.currency)}</span></div>
+                {block.prod_date && <div><strong>Data produção:</strong> {fmtDate(block.prod_date)}</div>}
+              </div>
+
+              {/* Medidas brutas */}
+              <div style={{ background: '#fff', padding: 10, borderRadius: 8, marginTop: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+                  Medidas brutas
+                </div>
+                {block.gross_l ? (
+                  <>
+                    <div style={{ fontSize: 13 }}>C: {block.gross_l} m · A: {block.gross_h} m · L: {block.gross_w} m</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>Vol: {(block.gross_volume || 0).toFixed(2)} m³</div>
+                  </>
+                ) : <div style={{ fontSize: 12, color: 'var(--mist)' }}>—</div>}
+              </div>
+
+              {/* Medidas líquidas */}
+              <div style={{ background: '#dcfce7', padding: 10, borderRadius: 8, marginTop: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+                  Medidas líquidas
+                </div>
+                {block.net_l ? (
+                  <>
+                    <div style={{ fontSize: 13 }}>C: {block.net_l} m · A: {block.net_h} m · L: {block.net_w} m</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#15803d', marginTop: 2 }}>Vol: {(block.net_volume || 0).toFixed(2)} m³</div>
+                  </>
+                ) : <div style={{ fontSize: 12, color: 'var(--mist)' }}>—</div>}
+              </div>
+
+              {/* Valor por m³ + Valor total */}
+              <div style={{ background: 'var(--sap1)', padding: 10, borderRadius: 8, marginTop: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, color: 'var(--sap7)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5 }}>Preço m³</span>
+                  <span style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14, color: 'var(--sap7)' }}>{money(originalPriceM3, block.currency)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 11, color: 'var(--sap7)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5 }}>Total</span>
+                  <span style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 18, color: 'var(--sap7)' }}>{money(block.total_value, block.currency)}</span>
+                </div>
               </div>
             </div>
 
@@ -5350,8 +5408,7 @@ function IndInspectionFormModal({ profile, block, existingInspection, inspection
 
               <div className="fg">
                 <label className="fl">Observações internas</label>
-                <textarea className="fc" rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}
-                  placeholder="Ex: pedra excelente, sugiro pedir desconto para 22k" />
+                <textarea className="fc" rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
               </div>
 
               <div style={{ background: 'var(--sap1)', padding: 12, borderRadius: 8, marginBottom: 10 }}>
@@ -5363,23 +5420,37 @@ function IndInspectionFormModal({ profile, block, existingInspection, inspection
                     <option value="USD">USD (US$)</option>
                     <option value="BRL">BRL (R$)</option>
                   </select>
-                  <input className="fc" type="number" step="0.01" value={form.negotiated_value} onChange={e => setForm({ ...form, negotiated_value: e.target.value })} placeholder="Ex: 22000.00" />
+                  <input className="fc" type="number" step="0.01" value={form.negotiated_value} onChange={e => setForm({ ...form, negotiated_value: e.target.value })} placeholder="0.00" />
                 </div>
               </div>
 
-              <div style={{ background: '#fef3c7', padding: 12, borderRadius: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#854d0e', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-                  📐 Medidas negociadas (m)
+              {/* Medidas brutas negociadas */}
+              <div style={{ background: '#f3f4f6', padding: 12, borderRadius: 8, marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                  📐 Medidas brutas negociadas
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-                  <input className="fc" type="number" step="0.01" placeholder="L" value={form.negotiated_l} onChange={e => setForm({ ...form, negotiated_l: e.target.value })} />
-                  <input className="fc" type="number" step="0.01" placeholder="H" value={form.negotiated_h} onChange={e => setForm({ ...form, negotiated_h: e.target.value })} />
-                  <input className="fc" type="number" step="0.01" placeholder="W" value={form.negotiated_w} onChange={e => setForm({ ...form, negotiated_w: e.target.value })} />
+                  <input className="fc" type="number" step="0.01" placeholder="C" value={form.negotiated_gross_l} onChange={e => setForm({ ...form, negotiated_gross_l: e.target.value })} />
+                  <input className="fc" type="number" step="0.01" placeholder="A" value={form.negotiated_gross_h} onChange={e => setForm({ ...form, negotiated_gross_h: e.target.value })} />
+                  <input className="fc" type="number" step="0.01" placeholder="L" value={form.negotiated_gross_w} onChange={e => setForm({ ...form, negotiated_gross_w: e.target.value })} />
                 </div>
-                {negotiatedVolume > 0 && (
-                  <div style={{ fontSize: 13, marginTop: 8, color: '#854d0e', fontWeight: 700 }}>
-                    Volume negociado: {negotiatedVolume.toFixed(2)} m³
-                  </div>
+                {negotiatedGrossVolume > 0 && (
+                  <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700 }}>Volume bruto: {negotiatedGrossVolume.toFixed(2)} m³</div>
+                )}
+              </div>
+
+              {/* Medidas líquidas negociadas */}
+              <div style={{ background: '#dcfce7', padding: 12, borderRadius: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                  📐 Medidas líquidas negociadas
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                  <input className="fc" type="number" step="0.01" placeholder="C" value={form.negotiated_l} onChange={e => setForm({ ...form, negotiated_l: e.target.value })} />
+                  <input className="fc" type="number" step="0.01" placeholder="A" value={form.negotiated_h} onChange={e => setForm({ ...form, negotiated_h: e.target.value })} />
+                  <input className="fc" type="number" step="0.01" placeholder="L" value={form.negotiated_w} onChange={e => setForm({ ...form, negotiated_w: e.target.value })} />
+                </div>
+                {negotiatedNetVolume > 0 && (
+                  <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700, color: '#15803d' }}>Volume líquido: {negotiatedNetVolume.toFixed(2)} m³</div>
                 )}
               </div>
             </div>
@@ -7098,6 +7169,7 @@ function IndVisitDetailPage({ profile, buyerData, onChange, toast, visitId, setP
   const allInspections = buyerData?.inspections || []
   const allExternals = buyerData?.externalBlocks || []
   const [showAddBlock, setShowAddBlock] = useState(false)
+  const [showFinalize, setShowFinalize] = useState(false)
   const [originalBlocks, setOriginalBlocks] = useState({})
 
   const visit = visits.find(v => v.id === visitId)
@@ -7183,19 +7255,30 @@ function IndVisitDetailPage({ profile, buyerData, onChange, toast, visitId, setP
             )}
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {visit.status === 'open' ? (
+            {visit.finalized_at ? (
+              <span className="bdg" style={{ background: '#dcfce7', color: '#15803d', fontSize: 12, padding: '6px 12px', fontWeight: 700 }}>
+                ✅ Compra Finalizada em {fmtDate(visit.finalized_at)}
+              </span>
+            ) : (
               <>
                 <button className="btn bb" onClick={() => setShowAddBlock(true)}>
                   <Icon n="plus" s={15} c="#fff" /> Cadastrar Bloco
                 </button>
-                <button className="btn bo" onClick={closeVisit}>✓ Encerrar</button>
+                {totalBlocks > 0 && (
+                  <button className="btn" style={{ background: 'var(--ok)', color: '#fff' }} onClick={() => setShowFinalize(true)}>
+                    💰 Finalizar Compra
+                  </button>
+                )}
+                {visit.status === 'open' ? (
+                  <button className="btn bo" onClick={closeVisit}>✓ Encerrar</button>
+                ) : (
+                  <button className="btn bo" onClick={reopenVisit}>🔓 Reabrir</button>
+                )}
+                <button className="btn bo" onClick={removeVisit} title="Excluir inspeção">
+                  <Icon n="trash" s={14} c="var(--err)" />
+                </button>
               </>
-            ) : (
-              <button className="btn bo" onClick={reopenVisit}>🔓 Reabrir</button>
             )}
-            <button className="btn bo" onClick={removeVisit} title="Excluir inspeção">
-              <Icon n="trash" s={14} c="var(--err)" />
-            </button>
           </div>
         </div>
       </div>
@@ -7268,6 +7351,21 @@ function IndVisitDetailPage({ profile, buyerData, onChange, toast, visitId, setP
           visit={visit}
           onClose={() => setShowAddBlock(false)}
           onAdded={() => { setShowAddBlock(false); onChange && onChange() }}
+          toast={toast}
+        />
+      )}
+
+      {showFinalize && (
+        <FinalizeInspectionPurchaseModal
+          profile={profile}
+          buyerData={buyerData}
+          visit={visit}
+          onClose={() => setShowFinalize(false)}
+          onFinalized={async () => {
+            setShowFinalize(false)
+            if (onChange) await onChange()
+            setPage && setPage('ind_purchases')
+          }}
           toast={toast}
         />
       )}
@@ -7695,8 +7793,8 @@ function IndCatalogPage({ profile, buyerData, onChange, toast }) {
   return (
     <div>
       <div className="ph">
-        <div className="ptit">🛍️ Catálogo</div>
-        <div className="psub">{filtered.length} bloco(s) {hasFilter ? `de ${items.length}` : 'inspecionado(s)'}</div>
+        <div className="ptit">📦 Catálogo Interno</div>
+        <div className="psub">{filtered.length} bloco(s) marcado(s) pela sua equipe{hasFilter ? ` (de ${items.length})` : ''}</div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -7805,18 +7903,309 @@ function IndCatalogPage({ profile, buyerData, onChange, toast }) {
 // ═══════════════════════════════════════════════════════════════
 // IND CARTS — placeholder para próxima etapa (Etapa 5)
 // ═══════════════════════════════════════════════════════════════
-function IndCartsPage({ profile, buyerData, onChange, toast }) {
+// ═══════════════════════════════════════════════════════════════
+// IND QUARRY CATALOG — vitrine pública de blocos das pedreiras Stone Block
+// ═══════════════════════════════════════════════════════════════
+function IndQuarryCatalogPage({ profile, buyerData, toast }) {
+  const [blocks, setBlocks] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [filterMaterial, setFilterMaterial] = useState('')
+  const [detail, setDetail] = useState(null)
+
+  useEffect(() => {
+    ;(async () => {
+      setLoading(true)
+      try {
+        const data = await api.listIndQuarryCatalog()
+        setBlocks(data || [])
+      } catch (e) { toast('Erro ao carregar catálogo: ' + e.message, 'err') }
+      finally { setLoading(false) }
+    })()
+  }, [])
+
+  const filtered = blocks.filter(b => {
+    if (search && !(b.code || '').toLowerCase().includes(search.toLowerCase()) && !((b.sys_code || '').toLowerCase().includes(search.toLowerCase()))) return false
+    if (filterMaterial && b.material !== filterMaterial) return false
+    return true
+  })
+
+  const allMaterials = [...new Set(blocks.map(b => b.material).filter(Boolean))].sort()
+
   return (
     <div>
       <div className="ph">
-        <div className="ptit">🛒 Carrinho</div>
-        <div className="psub">Em breve</div>
+        <div className="ptit">🏔️ Catálogo da Pedreira</div>
+        <div className="psub">{filtered.length} bloco(s) disponíveis em pedreiras Stone Block{(search || filterMaterial) ? ` (de ${blocks.length})` : ''}</div>
       </div>
-      <div className="card" style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: 20 }}>
-        <div style={{ fontWeight: 700, color: '#854d0e', marginBottom: 8 }}>🚧 Funcionalidade em construção</div>
-        <div style={{ fontSize: 13, color: '#92400e', lineHeight: 1.6 }}>
-          O Carrinho permitirá selecionar blocos do catálogo, montar uma lista de compra
-          e gerar o romaneio em PDF para enviar à pedreira. Será entregue na próxima etapa.
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <input className="fc" style={{ flex: '0 1 240px', fontSize: 13, padding: '7px 12px', textTransform: 'uppercase' }}
+          placeholder="🔍 Código ou SB-XXXX..." value={search} onChange={e => setSearch(e.target.value.toUpperCase())} />
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+          <option value="">Todos os materiais</option>
+          {allMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        {(search || filterMaterial) && (
+          <button className="btn bo bsm" onClick={() => { setSearch(''); setFilterMaterial('') }}>
+            <Icon n="x" s={13} /> Limpar
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 40, textAlign: 'center', color: 'var(--mist)' }}><span className="spinner"></span> Carregando catálogo...</div>
+      ) : filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
+          <div className="estit">{blocks.length === 0 ? 'Catálogo vazio' : 'Nenhum bloco encontrado'}</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))' }}>
+          {filtered.map(b => (
+            <div key={b.id} className="card" style={{ cursor: 'pointer', borderTop: '4px solid var(--sap6)' }} onClick={() => setDetail(b)}>
+              {b.photos[0] ? (
+                <div style={{ position: 'relative' }}>
+                  <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 200, objectFit: 'cover', display: 'block' }} />
+                  {b.photos.length > 1 && (
+                    <div style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,.65)', color: '#fff', padding: '3px 9px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>
+                      📷 {b.photos.length}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ height: 180, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
+              )}
+              <div className="cb">
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{b.code}</div>
+                {b.sys_code && <div style={{ fontSize: 11, color: 'var(--mist)', fontFamily: 'monospace', marginBottom: 4 }}>{b.sys_code}</div>}
+                <div style={{ fontSize: 13, marginBottom: 4 }}>{b.material}</div>
+                <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 6 }}>Classif. {b.classification} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--sap7)' }}>
+                  {money(b.total_value, b.currency)}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {detail && (
+        <BlockDetailModal block={detail} quarry={null} onClose={() => setDetail(null)} />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FINALIZE INSPECTION PURCHASE MODAL — modal "Finalizar Compra"
+// ═══════════════════════════════════════════════════════════════
+function FinalizeInspectionPurchaseModal({ profile, buyerData, visit, onClose, onFinalized, toast }) {
+  const inspections = buyerData?.inspections || []
+  const externalBlocks = buyerData?.externalBlocks || []
+  const inspectionsHere = inspections.filter(i => i.inspection_id === visit.id)
+  const externalsHere = externalBlocks.filter(b => b.inspection_id === visit.id)
+
+  const [paymentMethods, setPaymentMethods] = useState([])
+  const [originalBlocks, setOriginalBlocks] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    dollar_rate: '',
+    payment_method_id: '',
+    payment_method_name: '',
+    notes: '',
+  })
+
+  // Carrega blocos originais e payment methods da pedreira
+  useEffect(() => {
+    ;(async () => {
+      setLoading(true)
+      try {
+        // Carrega blocos originais (para descobrir quarry_company_id)
+        const origIds = [...new Set(inspectionsHere.map(i => i.original_block_id))]
+        const map = {}
+        let quarryCompanyId = null
+        for (const id of origIds) {
+          const { data } = await supabase.from('blocks').select('*').eq('id', id).maybeSingle()
+          if (data) {
+            map[id] = data
+            if (!quarryCompanyId) quarryCompanyId = data.company_id
+          }
+        }
+        setOriginalBlocks(map)
+
+        // Se for Stone Block, carrega payment methods da pedreira
+        if (visit.uses_stone_block && quarryCompanyId) {
+          const pm = await api.listPaymentMethodsForQuarry(quarryCompanyId)
+          setPaymentMethods(pm)
+        }
+      } catch (e) {
+        console.error(e)
+      } finally { setLoading(false) }
+    })()
+  }, [visit.id])
+
+  // Calcula totais
+  let totalUSD = 0
+  let totalBRL = 0
+  inspectionsHere.forEach(i => {
+    const orig = originalBlocks[i.original_block_id]
+    const val = Number(i.negotiated_value) || Number(orig?.total_value) || 0
+    const cur = i.negotiated_currency || orig?.currency || 'USD'
+    if (cur === 'USD') totalUSD += val
+    else totalBRL += val
+  })
+  externalsHere.forEach(b => {
+    const val = Number(b.total_value) || 0
+    if ((b.currency || 'USD') === 'USD') totalUSD += val
+    else totalBRL += val
+  })
+
+  const dollarRate = parseFloat(form.dollar_rate) || 0
+  const totalCombinedBRL = totalBRL + (totalUSD * dollarRate)
+
+  const handlePaymentMethodChange = (id) => {
+    const pm = paymentMethods.find(p => p.id === id)
+    setForm({ ...form, payment_method_id: id, payment_method_name: pm?.name || '' })
+  }
+
+  const save = async () => {
+    if (visit.uses_stone_block && totalUSD > 0 && !dollarRate) {
+      toast('Informe a cotação do dólar.', 'err'); return
+    }
+    if (!form.payment_method_name && !form.payment_method_id) {
+      toast('Informe a forma de pagamento.', 'err'); return
+    }
+    setSaving(true)
+    try {
+      const result = await api.finalizeInspectionPurchase(profile, visit.id, {
+        dollar_rate: dollarRate,
+        payment_method_id: form.payment_method_id || null,
+        payment_method_name: form.payment_method_name || null,
+        notes: form.notes.trim() || null,
+      })
+      toast('✅ Compra finalizada!', 'ok')
+      if (onFinalized) await onFinalized(result)
+    } catch (e) {
+      console.error('Erro finalizar:', e)
+      toast('Erro: ' + e.message, 'err')
+    } finally { setSaving(false) }
+  }
+
+  const totalBlocks = inspectionsHere.length + externalsHere.length
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div>
+            <div className="mtit">💰 Finalizar Compra</div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>
+              {totalBlocks} bloco(s) · Esta ação é definitiva
+            </div>
+          </div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          {loading ? (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--mist)' }}><span className="spinner"></span> Carregando...</div>
+          ) : (
+            <>
+              {/* Resumo */}
+              <div style={{ background: 'var(--haze)', padding: 14, borderRadius: 10, marginBottom: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>📋 Resumo dos blocos</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 }}>
+                  {inspectionsHere.map(i => {
+                    const orig = originalBlocks[i.original_block_id]
+                    const val = i.negotiated_value || orig?.total_value
+                    const cur = i.negotiated_currency || orig?.currency
+                    return (
+                      <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>📷 {orig?.code || '?'} — {orig?.material}</span>
+                        <strong>{money(val, cur)}</strong>
+                      </div>
+                    )
+                  })}
+                  {externalsHere.map(b => (
+                    <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>📍 {b.code} — {b.material}</span>
+                      <strong>{money(b.total_value, b.currency)}</strong>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--fog)', marginTop: 10, paddingTop: 10 }}>
+                  {totalUSD > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                      <span>Total USD:</span>
+                      <strong style={{ color: 'var(--sap7)' }}>{money(totalUSD, 'USD')}</strong>
+                    </div>
+                  )}
+                  {totalBRL > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                      <span>Total BRL:</span>
+                      <strong style={{ color: 'var(--sap7)' }}>{money(totalBRL, 'BRL')}</strong>
+                    </div>
+                  )}
+                  {dollarRate > 0 && totalUSD > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 700, color: 'var(--ok)', marginTop: 4 }}>
+                      <span>Total convertido R$:</span>
+                      <span>{money(totalCombinedBRL, 'BRL')}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Cotação do dólar */}
+              {totalUSD > 0 && (
+                <div className="fg">
+                  <label className="fl">Cotação do dólar (R$/US$) *</label>
+                  <input className="fc" type="number" step="0.0001" value={form.dollar_rate} onChange={e => setForm({ ...form, dollar_rate: e.target.value })} placeholder="Ex: 5.20" />
+                </div>
+              )}
+
+              {/* Forma de pagamento */}
+              {visit.uses_stone_block && paymentMethods.length > 0 ? (
+                <div className="fg">
+                  <label className="fl">Forma de pagamento *</label>
+                  <select className="fc" value={form.payment_method_id} onChange={e => handlePaymentMethodChange(e.target.value)}>
+                    <option value="">Selecione...</option>
+                    {paymentMethods.map(pm => <option key={pm.id} value={pm.id}>{pm.name}</option>)}
+                  </select>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 4 }}>Lista vinda da pedreira</div>
+                </div>
+              ) : (
+                <div className="fg">
+                  <label className="fl">Forma de pagamento *</label>
+                  <input className="fc" value={form.payment_method_name} onChange={e => setForm({ ...form, payment_method_name: e.target.value })} placeholder="Ex: à vista, 30/60/90, FOB..." />
+                </div>
+              )}
+
+              {/* Observações */}
+              <div className="fg">
+                <label className="fl">Observações finais</label>
+                <textarea className="fc" rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+              </div>
+
+              {/* Aviso de ação definitiva */}
+              <div style={{ background: '#fee2e2', padding: 12, borderRadius: 8, fontSize: 13, color: '#991b1b', lineHeight: 1.5 }}>
+                ⚠️ <strong>Esta ação é definitiva.</strong> Após confirmar:
+                <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                  {visit.uses_stone_block && <li>Os blocos serão marcados como vendidos na pedreira</li>}
+                  {visit.uses_stone_block && <li>Será criada uma venda no sistema da pedreira</li>}
+                  <li>Romaneios serão gerados em PDF</li>
+                  <li>Notificações serão enviadas a todos os envolvidos</li>
+                </ul>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose} disabled={saving}>Cancelar</button>
+          <button className="btn bb" onClick={save} disabled={saving || loading}>
+            {saving ? <><span className="spinner"></span> Finalizando</> : '✓ Confirmar Compra'}
+          </button>
         </div>
       </div>
     </div>
@@ -7824,20 +8213,260 @@ function IndCartsPage({ profile, buyerData, onChange, toast }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// IND PURCHASES — placeholder
+// IND CARTS — placeholder (mantido por compatibilidade da rota)
+// ═══════════════════════════════════════════════════════════════
+function IndCartsPage({ profile, buyerData, onChange, toast }) {
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">🛒 Carrinho</div>
+      </div>
+      <div className="card" style={{ padding: 20 }}>
+        <div style={{ fontSize: 13, color: 'var(--mist)' }}>Funcionalidade removida — a compra é finalizada direto na inspeção.</div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND PURCHASES — lista de compras finalizadas
 // ═══════════════════════════════════════════════════════════════
 function IndPurchasesPage({ profile, buyerData, onChange, toast }) {
+  const purchases = buyerData?.purchases || []
+  const visits = buyerData?.visits || []
+  const team = buyerData?.team || []
+  const externalQuarries = buyerData?.externalQuarries || []
+
+  const [filterPeriod, setFilterPeriod] = useState('month')
+  const [dtInicio, setDtInicio] = useState('')
+  const [dtFim, setDtFim] = useState('')
+  const [filterMarker, setFilterMarker] = useState('')
+  const [filterQuarry, setFilterQuarry] = useState('')
+  const [search, setSearch] = useState('')
+  const [detail, setDetail] = useState(null)
+
+  const matchesPeriod = (date) => {
+    if (filterPeriod === 'all') return true
+    const d = new Date(date)
+    const now = new Date()
+    if (filterPeriod === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+    if (filterPeriod === 'last_month') {
+      const last = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      return d.getMonth() === last.getMonth() && d.getFullYear() === last.getFullYear()
+    }
+    if (filterPeriod === 'year') return d.getFullYear() === now.getFullYear()
+    if (filterPeriod === 'custom') {
+      if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
+      if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+      return true
+    }
+    return true
+  }
+
+  const filtered = purchases.filter(p => {
+    if (!matchesPeriod(p.created_at)) return false
+    const visit = visits.find(v => v.id === p.inspection_id)
+    if (filterMarker && visit?.marker_id !== filterMarker) return false
+    if (filterQuarry && p.external_quarry_id !== filterQuarry) return false
+    // busca: por código de bloco está no detalhe; aqui filtramos por id ou nome da pedreira
+    if (search) {
+      const quarry = externalQuarries.find(q => q.id === p.external_quarry_id)
+      const sLower = search.toLowerCase()
+      if (!((quarry?.name || '').toLowerCase().includes(sLower)) && !(p.id || '').includes(search)) return false
+    }
+    return true
+  })
+
+  const hasFilter = filterPeriod !== 'month' || filterMarker || filterQuarry || dtInicio || dtFim || search
+
   return (
     <div>
       <div className="ph">
         <div className="ptit">💳 Compras</div>
-        <div className="psub">Em breve</div>
+        <div className="psub">{filtered.length} compra(s){hasFilter ? ` de ${purchases.length}` : ''}</div>
       </div>
-      <div className="card" style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: 20 }}>
-        <div style={{ fontWeight: 700, color: '#854d0e', marginBottom: 8 }}>🚧 Funcionalidade em construção</div>
-        <div style={{ fontSize: 13, color: '#92400e', lineHeight: 1.6 }}>
-          O histórico de compras com os romaneios em PDF será entregue na próxima etapa,
-          junto com o Carrinho.
+
+      {/* Filtros */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="cb" style={{ padding: '12px 14px' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Filtros:</span>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
+              <option value="month">Mês atual</option>
+              <option value="last_month">Mês anterior</option>
+              <option value="year">Ano atual</option>
+              <option value="all">Todos os períodos</option>
+              <option value="custom">Período personalizado</option>
+            </select>
+            {filterPeriod === 'custom' && (
+              <>
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} onChange={e => setDtInicio(e.target.value)} />
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} onChange={e => setDtFim(e.target.value)} />
+              </>
+            )}
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterMarker} onChange={e => setFilterMarker(e.target.value)}>
+              <option value="">Todos os marcadores</option>
+              {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+              <option value="">Todas as pedreiras</option>
+              {externalQuarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+            </select>
+            <input className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 160 }} placeholder="🔍 Buscar..." value={search} onChange={e => setSearch(e.target.value)} />
+            {hasFilter && (
+              <button className="btn bo bsm" onClick={() => { setFilterPeriod('month'); setFilterMarker(''); setFilterQuarry(''); setDtInicio(''); setDtFim(''); setSearch('') }}>
+                <Icon n="x" s={13} /> Limpar
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="card" s={48} /></div>
+          <div className="estit">{purchases.length === 0 ? 'Nenhuma compra finalizada ainda' : 'Nenhuma compra encontrada com os filtros'}</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))' }}>
+          {filtered.map(p => {
+            const visit = visits.find(v => v.id === p.inspection_id)
+            const quarry = externalQuarries.find(q => q.id === p.external_quarry_id)
+            const marker = team.find(m => m.id === visit?.marker_id)
+            return (
+              <div key={p.id} className="card" style={{ cursor: 'pointer', borderTop: '4px solid var(--ok)' }} onClick={() => setDetail({ purchase: p, visit, quarry, marker })}>
+                <div className="cb">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span className="bdg" style={{ background: '#dcfce7', color: '#15803d', fontSize: 11 }}>✓ Finalizada</span>
+                    <span style={{ fontSize: 11, color: 'var(--mist)' }}>{fmtDate(p.created_at)}</span>
+                  </div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, marginBottom: 4 }}>📍 {quarry?.name || '—'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--mist)', marginBottom: 8 }}>👤 {marker?.name || '—'}</div>
+                  {p.total_usd > 0 && (
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--sap7)' }}>{money(p.total_usd, 'USD')}</div>
+                  )}
+                  {p.total_brl > 0 && (
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--sap7)' }}>{money(p.total_brl, 'BRL')}</div>
+                  )}
+                  {p.payment_method_name && (
+                    <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 4 }}>💳 {p.payment_method_name}</div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {detail && <PurchaseDetailModal item={detail} buyerData={buyerData} onClose={() => setDetail(null)} />}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PURCHASE DETAIL MODAL — detalhe de uma compra
+// ═══════════════════════════════════════════════════════════════
+function PurchaseDetailModal({ item, buyerData, onClose }) {
+  const { purchase, visit, quarry, marker } = item
+  const inspections = buyerData?.inspections || []
+  const externalBlocks = buyerData?.externalBlocks || []
+  const inspectionsHere = inspections.filter(i => i.inspection_id === purchase.inspection_id)
+  const externalsHere = externalBlocks.filter(b => b.inspection_id === purchase.inspection_id)
+  const [originalBlocks, setOriginalBlocks] = useState({})
+
+  useEffect(() => {
+    const ids = [...new Set(inspectionsHere.map(i => i.original_block_id))]
+    if (ids.length === 0) return
+    ;(async () => {
+      const map = {}
+      for (const id of ids) {
+        const { data } = await supabase.from('blocks').select('*').eq('id', id).maybeSingle()
+        if (data) map[id] = data
+      }
+      setOriginalBlocks(map)
+    })()
+  }, [purchase.id])
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 760 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div>
+            <div className="mtit">💳 Compra #{purchase.id?.slice(0, 8)}</div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>{quarry?.name} · {fmtDate(purchase.created_at)}</div>
+          </div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          <div style={{ background: 'var(--haze)', padding: 14, borderRadius: 10, marginBottom: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 10, fontSize: 13 }}>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Pedreira</div>
+                <div style={{ fontWeight: 700 }}>{quarry?.name || '—'}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Marcador</div>
+                <div style={{ fontWeight: 700 }}>{marker?.name || '—'}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Pagamento</div>
+                <div style={{ fontWeight: 700 }}>{purchase.payment_method_name || '—'}</div>
+              </div>
+              {purchase.dollar_rate && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Dólar</div>
+                  <div style={{ fontWeight: 700 }}>R$ {Number(purchase.dollar_rate).toFixed(4)}</div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--fog)', marginTop: 10, paddingTop: 10 }}>
+              {purchase.total_usd > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total USD:</span><strong style={{ color: 'var(--sap7)' }}>{money(purchase.total_usd, 'USD')}</strong></div>}
+              {purchase.total_brl > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total BRL:</span><strong style={{ color: 'var(--sap7)' }}>{money(purchase.total_brl, 'BRL')}</strong></div>}
+            </div>
+
+            {purchase.notes && (
+              <div style={{ marginTop: 10, fontSize: 13 }}>
+                <strong>Observações:</strong> {purchase.notes}
+              </div>
+            )}
+          </div>
+
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+            🏗️ {inspectionsHere.length + externalsHere.length} bloco(s) comprado(s)
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {inspectionsHere.map(i => {
+              const orig = originalBlocks[i.original_block_id]
+              const photo = (i.photos && i.photos[0]) || (orig?.photos && (Array.isArray(orig.photos) ? orig.photos[0] : null))
+              return (
+                <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, background: 'var(--haze)', borderRadius: 8 }}>
+                  {photo && <img src={photo} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 6 }} />}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700 }}>{orig?.code || '?'} <span className="bdg" style={{ background: 'var(--sap1)', color: 'var(--sap7)', fontSize: 10, marginLeft: 4 }}>Stone Block</span></div>
+                    <div style={{ fontSize: 12, color: 'var(--mist)' }}>{orig?.material}</div>
+                  </div>
+                  <div style={{ fontWeight: 700, color: 'var(--sap7)' }}>
+                    {money(i.negotiated_value || orig?.total_value, i.negotiated_currency || orig?.currency)}
+                  </div>
+                </div>
+              )
+            })}
+            {externalsHere.map(b => (
+              <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, background: '#fef3c7', borderRadius: 8 }}>
+                {b.photos && b.photos[0] && <img src={b.photos[0]} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 6 }} />}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700 }}>{b.code} <span className="bdg" style={{ background: '#fef3c7', color: '#d97706', fontSize: 10, marginLeft: 4 }}>Externo</span></div>
+                  <div style={{ fontSize: 12, color: 'var(--mist)' }}>{b.material}</div>
+                </div>
+                <div style={{ fontWeight: 700, color: 'var(--sap7)' }}>{money(b.total_value, b.currency)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose}>Fechar</button>
         </div>
       </div>
     </div>
@@ -8184,12 +8813,61 @@ function AdminPage({ profile, toast }) {
 // IND DASHBOARD — placeholder para Stone Block Ind (etapas seguintes)
 // ═══════════════════════════════════════════════════════════════
 function IndDashboardPage({ profile, buyerData, toast, setPage }) {
+  const [filterPeriod, setFilterPeriod] = useState('month')
+  const [dtInicio, setDtInicio] = useState('')
+  const [dtFim, setDtFim] = useState('')
+  const [filterMarker, setFilterMarker] = useState('')
+  const [filterQuarry, setFilterQuarry] = useState('')
+
   if (!buyerData) {
     return <div style={{ padding: 40, textAlign: 'center', color: 'var(--mist)' }}>Carregando dados da indústria...</div>
   }
-  const { company, team, inspections, externalBlocks, visits } = buyerData
-  const totalBlocks = (inspections?.length || 0) + (externalBlocks?.length || 0)
-  const openVisits = (visits || []).filter(v => v.status === 'open').length
+  const { company, team, inspections, externalBlocks, visits, purchases, externalQuarries } = buyerData
+
+  const matchesPeriod = (date) => {
+    if (filterPeriod === 'all') return true
+    const d = new Date(date)
+    const now = new Date()
+    if (filterPeriod === 'month') {
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+    } else if (filterPeriod === 'last_month') {
+      const last = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      return d.getMonth() === last.getMonth() && d.getFullYear() === last.getFullYear()
+    } else if (filterPeriod === 'year') {
+      return d.getFullYear() === now.getFullYear()
+    } else if (filterPeriod === 'custom') {
+      if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
+      if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+      return true
+    }
+    return true
+  }
+
+  const filteredVisits = (visits || []).filter(v => {
+    if (!matchesPeriod(v.visit_date)) return false
+    if (filterMarker && v.marker_id !== filterMarker) return false
+    if (filterQuarry && v.external_quarry_id !== filterQuarry) return false
+    return true
+  })
+
+  const visitIds = new Set(filteredVisits.map(v => v.id))
+  const filteredInspections = (inspections || []).filter(i => visitIds.has(i.inspection_id))
+  const filteredExternals = (externalBlocks || []).filter(b => visitIds.has(b.inspection_id))
+  const filteredPurchases = (purchases || []).filter(p => visitIds.has(p.inspection_id) || matchesPeriod(p.created_at))
+
+  const totalBlocks = filteredInspections.length + filteredExternals.length
+  const openVisits = filteredVisits.filter(v => v.status === 'open').length
+  const closedVisits = filteredVisits.filter(v => v.status === 'closed').length
+
+  let totalBRL = 0
+  let totalUSD = 0
+  filteredPurchases.forEach(p => {
+    totalBRL += Number(p.total_brl) || 0
+    totalUSD += Number(p.total_usd) || 0
+  })
+
+  const hasFilter = filterPeriod !== 'month' || filterMarker || filterQuarry || dtInicio || dtFim
+
   return (
     <div>
       <div className="ph">
@@ -8197,50 +8875,87 @@ function IndDashboardPage({ profile, buyerData, toast, setPage }) {
         <div className="psub">{company?.name} · {profile.buyer_role === 'director' ? 'Diretor' : profile.buyer_role === 'marker' ? 'Marcador' : 'Assistente'}</div>
       </div>
 
-      {/* Botão grande "Cadastrar Inspeção" */}
-      <div className="card" style={{ marginBottom: 16, background: 'linear-gradient(135deg, var(--sap6), var(--sap7))', border: 'none', cursor: 'pointer' }} onClick={() => setPage && setPage('ind_new_visit')}>
-        <div className="cb" style={{ textAlign: 'center', padding: 26 }}>
-          <div style={{ fontSize: 36, marginBottom: 6 }}>📍</div>
-          <div style={{ color: '#fff', fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 22 }}>Cadastrar Inspeção</div>
-          <div style={{ color: 'rgba(255,255,255,.85)', fontSize: 13, marginTop: 4 }}>Registre uma nova visita a uma pedreira</div>
+      {/* Filtros */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="cb" style={{ padding: '12px 14px' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Filtros:</span>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
+              <option value="month">Mês atual</option>
+              <option value="last_month">Mês anterior</option>
+              <option value="year">Ano atual</option>
+              <option value="all">Todos os períodos</option>
+              <option value="custom">Período personalizado</option>
+            </select>
+            {filterPeriod === 'custom' && (
+              <>
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} onChange={e => setDtInicio(e.target.value)} />
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} onChange={e => setDtFim(e.target.value)} />
+              </>
+            )}
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterMarker} onChange={e => setFilterMarker(e.target.value)}>
+              <option value="">Todos os marcadores</option>
+              {(team || []).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+              <option value="">Todas as pedreiras</option>
+              {(externalQuarries || []).map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+            </select>
+            {hasFilter && (
+              <button className="btn bo bsm" onClick={() => { setFilterPeriod('month'); setFilterMarker(''); setFilterQuarry(''); setDtInicio(''); setDtFim('') }}>
+                <Icon n="x" s={13} /> Limpar
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 16 }}>
+      {/* Totalizadores */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12, marginBottom: 16 }}>
+        {totalUSD > 0 && (
+          <div className="card" style={{ background: 'linear-gradient(135deg,#10b981,#059669)', border: 'none' }}>
+            <div className="cb">
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Comprado US$</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 24, color: '#fff' }}>{money(totalUSD, 'USD')}</div>
+            </div>
+          </div>
+        )}
+        {totalBRL > 0 && (
+          <div className="card" style={{ background: 'linear-gradient(135deg,#0c1a2e,#1e3a8a)', border: 'none' }}>
+            <div className="cb">
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Comprado R$</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 24, color: '#fff' }}>{money(totalBRL, 'BRL')}</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 14, marginBottom: 16 }}>
         <div className="card" style={{ cursor: 'pointer' }} onClick={() => setPage && setPage('ind_visits')}>
           <div className="cb">
             <div className="slbl2">Inspeções</div>
-            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{visits?.length || 0}</div>
+            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{filteredVisits.length}</div>
             {openVisits > 0 && <div style={{ fontSize: 11, color: '#15803d', fontWeight: 600 }}>{openVisits} em aberto</div>}
           </div>
         </div>
         <div className="card" style={{ cursor: 'pointer' }} onClick={() => setPage && setPage('ind_catalog')}>
           <div className="cb">
-            <div className="slbl2">Blocos no Catálogo</div>
+            <div className="slbl2">Blocos Marcados</div>
             <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{totalBlocks}</div>
+          </div>
+        </div>
+        <div className="card" style={{ cursor: 'pointer' }} onClick={() => setPage && setPage('ind_purchases')}>
+          <div className="cb">
+            <div className="slbl2">Compras</div>
+            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{filteredPurchases.length}</div>
           </div>
         </div>
         <div className="card" style={{ cursor: 'pointer' }} onClick={() => setPage && setPage('ind_external_quarries')}>
           <div className="cb">
             <div className="slbl2">Pedreiras</div>
-            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{(buyerData.externalQuarries || []).length}</div>
+            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{(externalQuarries || []).length}</div>
           </div>
         </div>
-        <div className="card">
-          <div className="cb">
-            <div className="slbl2">Equipe</div>
-            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{(team || []).filter(t => t.is_active !== false).length}</div>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <button className="btn bo" onClick={() => setPage && setPage('ind_catalog')}>
-          <Icon n="cube" s={15} /> Ver Catálogo
-        </button>
-        <button className="btn bo" onClick={() => setPage && setPage('ind_external_quarries')}>
-          <Icon n="mtn" s={15} /> Pedreiras
-        </button>
       </div>
     </div>
   )
@@ -8577,9 +9292,9 @@ export default function App() {
     NAV = [
       { p: 'ind_dashboard',         l: 'Dashboard',           i: 'grid' },
       { p: 'ind_new_visit',         l: 'Cadastrar Inspeção',  i: 'plus' },
-      { p: 'ind_catalog',           l: 'Catálogo',            i: 'cube' },
+      { p: 'ind_quarry_catalog',    l: 'Catálogo da Pedreira', i: 'cube' },
+      { p: 'ind_catalog',           l: 'Catálogo Interno',    i: 'cube' },
       { p: 'ind_visits',            l: 'Inspeções',           i: 'check' },
-      { p: 'ind_carts',             l: 'Carrinho',            i: 'cart' },
       { p: 'ind_purchases',         l: 'Compras',             i: 'card' },
       { p: 'ind_external_quarries', l: 'Pedreiras',           i: 'mtn' },
     ]
@@ -8644,6 +9359,7 @@ export default function App() {
       case 'ind_new_visit':         return <IndNewVisitPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} setPage={setPage} setSelectedVisitId={setSelectedVisitId} />
       case 'ind_visits':            return <IndVisitsListPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} setPage={setPage} setSelectedVisitId={setSelectedVisitId} />
       case 'ind_visit_detail':      return <IndVisitDetailPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} visitId={selectedVisitId} setPage={setPage} />
+      case 'ind_quarry_catalog':    return <IndQuarryCatalogPage profile={profile} buyerData={buyerData} toast={showToast} />
       case 'ind_catalog':           return <IndCatalogPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'ind_carts':             return <IndCartsPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'ind_purchases':         return <IndPurchasesPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />

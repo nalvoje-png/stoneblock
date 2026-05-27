@@ -1265,6 +1265,7 @@ export async function loadBuyerCompanyData(profile) {
     externalQuarries,
     visits,
     cartItems,
+    purchases,
   ] = await Promise.all([
     getBuyerCompany(companyId),
     supabase.from('profiles').select('*').eq('buyer_company_id', companyId).then(r => r.data || []),
@@ -1280,6 +1281,7 @@ export async function loadBuyerCompanyData(profile) {
       const { data: items } = await supabase.from('buyer_cart_items').select('*').in('cart_id', cs.map(c => c.id))
       return items || []
     })(),
+    supabase.from('purchases').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []).catch(() => []),
   ])
 
   // Carrega itens das listas
@@ -1311,6 +1313,7 @@ export async function loadBuyerCompanyData(profile) {
     cartItems,
     externalQuarries,
     visits,
+    purchases,
   }
 }
 
@@ -1752,6 +1755,328 @@ export async function searchBlockForInspection(codeOrSysCode) {
       .limit(5)
     return d2 || []
   }
+  return data || []
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// FINALIZAR COMPRA — transação completa entre indústria e pedreira
+// ═══════════════════════════════════════════════════════════════
+
+// Lista os payment_methods de uma pedreira específica (para a indústria escolher)
+export async function listPaymentMethodsForQuarry(quarryCompanyId) {
+  if (!quarryCompanyId) return []
+  const { data, error } = await supabase
+    .from('payment_methods')
+    .select('*')
+    .eq('company_id', quarryCompanyId)
+  if (error) {
+    console.warn('Não foi possível listar payment_methods da pedreira:', error)
+    return []
+  }
+  return data || []
+}
+
+// Lista catálogo de blocos liberados das pedreiras (todas) para a indústria visualizar
+// Hoje: marketplace público — todos os blocos com status disponível
+export async function listIndQuarryCatalog() {
+  const { data, error } = await supabase
+    .from('blocks')
+    .select('*')
+    .in('status', ['available', 'produced', 'reserve'])
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return (data || []).map(b => ({
+    ...b,
+    photos: Array.isArray(b.photos) ? b.photos
+      : (typeof b.photos === 'string' ? (b.photos.startsWith('[') ? JSON.parse(b.photos) : [b.photos]) : []),
+  }))
+}
+
+// Cria notificação (helper)
+async function createNotification(userId, title, body, link) {
+  try {
+    await supabase.from('notifications').insert({
+      user_id: userId,
+      title,
+      body,
+      link: link || null,
+      read: false,
+    })
+  } catch (e) {
+    console.warn('Falha ao criar notificação:', e)
+  }
+}
+
+// Finaliza a compra de uma inspeção
+// payload: {
+//   dollar_rate: number,
+//   payment_method_id: uuid (opcional),
+//   payment_method_name: string,
+//   notes: string,
+//   blocks: [{ inspection_id, original_block_id, value, currency, gross_l, gross_h, gross_w, net_l, net_h, net_w }, ...]
+//     -- para blocos Stone Block: passar inspection_id + original_block_id
+//     -- para externos: passar external_block_id + value+currency
+//   externalBlocks: [{ id, value, currency, ... }]
+// }
+export async function finalizeInspectionPurchase(profile, visitId, payload) {
+  if (!profile?.buyer_company_id) throw new Error('Sem indústria associada')
+
+  // 1. Carrega dados da visita
+  const { data: visit, error: visitError } = await supabase
+    .from('inspections')
+    .select('*')
+    .eq('id', visitId)
+    .single()
+  if (visitError) throw visitError
+
+  // 2. Carrega dados da empresa compradora
+  const { data: buyerCompany } = await supabase
+    .from('buyer_companies')
+    .select('*')
+    .eq('id', profile.buyer_company_id)
+    .single()
+
+  // 3. Carrega blocos vinculados à inspeção (inspeções de blocos + externos)
+  const { data: insps } = await supabase
+    .from('block_inspections')
+    .select('*')
+    .eq('inspection_id', visitId)
+  const { data: externs } = await supabase
+    .from('external_blocks')
+    .select('*')
+    .eq('inspection_id', visitId)
+
+  const usesStoneBlock = visit.uses_stone_block
+
+  // 4. Se for Stone Block, descobre a quarry_company_id (pelo primeiro bloco original)
+  let quarryCompanyId = null
+  let originalBlocks = []
+  if (usesStoneBlock && insps && insps.length > 0) {
+    const origIds = insps.map(i => i.original_block_id)
+    const { data: blocks } = await supabase
+      .from('blocks')
+      .select('*')
+      .in('id', origIds)
+    originalBlocks = blocks || []
+    if (originalBlocks.length > 0) {
+      quarryCompanyId = originalBlocks[0].company_id
+    }
+  }
+
+  // 5. Calcula totais
+  let totalBRL = 0
+  let totalUSD = 0
+  const blockSummary = [] // pra usar em romaneio
+
+  for (const i of (insps || [])) {
+    const orig = originalBlocks.find(b => b.id === i.original_block_id)
+    const val = Number(i.negotiated_value) || Number(orig?.total_value) || 0
+    const cur = i.negotiated_currency || orig?.currency || 'USD'
+    if (cur === 'USD') totalUSD += val
+    else totalBRL += val
+    blockSummary.push({
+      code: orig?.code || '?',
+      material: orig?.material || '—',
+      value: val,
+      currency: cur,
+      type: 'inspection',
+      ref_id: i.id,
+      original_block_id: i.original_block_id,
+    })
+  }
+
+  for (const b of (externs || [])) {
+    const val = Number(b.total_value) || 0
+    const cur = b.currency || 'USD'
+    if (cur === 'USD') totalUSD += val
+    else totalBRL += val
+    blockSummary.push({
+      code: b.code,
+      material: b.material,
+      value: val,
+      currency: cur,
+      type: 'external',
+      ref_id: b.id,
+    })
+  }
+
+  const dollarRate = Number(payload.dollar_rate) || 0
+  // total convertido para BRL para registro contábil
+  let totalCombinedBRL = totalBRL + (totalUSD * dollarRate)
+
+  // 6. Se for Stone Block, cria/atualiza cliente na pedreira + registra venda
+  let saleId = null
+  let clientIdOnQuarry = null
+  let paymentMethodIdInQuarry = null
+
+  if (usesStoneBlock && quarryCompanyId && insps && insps.length > 0) {
+    // 6a. Procura cliente existente na pedreira pelo nome da indústria
+    const buyerName = buyerCompany?.name || 'Indústria'
+    const { data: existingClient } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('company_id', quarryCompanyId)
+      .ilike('name', buyerName)
+      .maybeSingle()
+
+    if (existingClient) {
+      clientIdOnQuarry = existingClient.id
+    } else {
+      const { data: newClient, error: clientErr } = await supabase
+        .from('clients')
+        .insert({
+          company_id: quarryCompanyId,
+          name: buyerName,
+          country: 'BR',
+          email: buyerCompany?.contact_email || null,
+          phone: buyerCompany?.contact_phone || null,
+        })
+        .select()
+        .single()
+      if (clientErr) {
+        console.warn('Erro ao criar cliente automático na pedreira:', clientErr)
+      } else {
+        clientIdOnQuarry = newClient.id
+      }
+    }
+
+    // 6b. Cria a venda no lado da pedreira (sales)
+    if (clientIdOnQuarry) {
+      const salePayload = {
+        company_id: quarryCompanyId,
+        client_id: clientIdOnQuarry,
+        seller_id: null, // Venda direta marketplace
+        payment_method_id: payload.payment_method_id || null,
+        total_brl: totalBRL,
+        total_usd: totalUSD,
+        dollar_rate: dollarRate || null,
+        obs: `Venda Direta - Stone Block Marketplace${payload.notes ? '\n' + payload.notes : ''}`,
+      }
+
+      const { data: newSale, error: saleErr } = await supabase
+        .from('sales')
+        .insert(salePayload)
+        .select()
+        .single()
+      if (saleErr) {
+        console.warn('Erro ao criar venda na pedreira:', saleErr)
+      } else {
+        saleId = newSale.id
+
+        // 6c. Cria sale_blocks (vincula blocos à venda)
+        const saleBlocksToInsert = blockSummary
+          .filter(b => b.type === 'inspection' && b.original_block_id)
+          .map(b => ({
+            sale_id: saleId,
+            block_id: b.original_block_id,
+          }))
+        if (saleBlocksToInsert.length > 0) {
+          const { error: sbErr } = await supabase
+            .from('sale_blocks')
+            .insert(saleBlocksToInsert)
+          if (sbErr) console.warn('Erro ao criar sale_blocks:', sbErr)
+        }
+
+        // 6d. Atualiza status dos blocos para 'sold'
+        const blockIds = blockSummary
+          .filter(b => b.type === 'inspection' && b.original_block_id)
+          .map(b => b.original_block_id)
+        if (blockIds.length > 0) {
+          const { error: updErr } = await supabase
+            .from('blocks')
+            .update({ status: 'sold' })
+            .in('id', blockIds)
+          if (updErr) console.warn('Erro ao atualizar blocos para sold:', updErr)
+        }
+      }
+    }
+  }
+
+  // 7. Atualiza status dos blocos externos
+  if (externs && externs.length > 0) {
+    const extIds = externs.map(b => b.id)
+    await supabase
+      .from('external_blocks')
+      .update({ status: 'bought' })
+      .in('id', extIds)
+  }
+
+  // 8. Cria registro em purchases (lado indústria)
+  const { data: purchase, error: purchaseErr } = await supabase
+    .from('purchases')
+    .insert({
+      buyer_company_id: profile.buyer_company_id,
+      inspection_id: visitId,
+      total_brl: totalBRL,
+      total_usd: totalUSD,
+      total_value: totalUSD > 0 ? totalUSD : totalBRL,
+      total_currency: totalUSD > 0 ? 'USD' : 'BRL',
+      dollar_rate: dollarRate || null,
+      payment_method_name: payload.payment_method_name || null,
+      payment_method_id: payload.payment_method_id || null,
+      notes: payload.notes || null,
+      quarry_company_id: quarryCompanyId,
+      external_quarry_id: visit.external_quarry_id || null,
+      sale_id: saleId,
+      client_id_on_quarry: clientIdOnQuarry,
+      finalized_by: profile.id,
+    })
+    .select()
+    .single()
+  if (purchaseErr) throw purchaseErr
+
+  // 9. Atualiza inspeção para status 'finalized'
+  await supabase
+    .from('inspections')
+    .update({
+      status: 'closed',
+      finalized_at: new Date().toISOString(),
+      finalized_by: profile.id,
+      closed_at: new Date().toISOString(),
+    })
+    .eq('id', visitId)
+
+  // 10. Cria notificações
+  // 10a. Para equipe da indústria
+  const { data: buyerTeam } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('buyer_company_id', profile.buyer_company_id)
+  for (const t of (buyerTeam || [])) {
+    await createNotification(
+      t.id,
+      '✅ Compra finalizada',
+      `${buyerCompany?.name || 'A empresa'} finalizou uma compra de ${blockSummary.length} bloco(s).`
+    )
+  }
+  // 10b. Para equipe da pedreira (se Stone Block)
+  if (usesStoneBlock && quarryCompanyId) {
+    const { data: quarryTeam } = await supabase
+      .from('profiles')
+      .select('id')
+      .or(`id.eq.${quarryCompanyId},company_id.eq.${quarryCompanyId}`)
+    for (const t of (quarryTeam || [])) {
+      await createNotification(
+        t.id,
+        '🎉 Nova venda direta!',
+        `${buyerCompany?.name || 'Uma indústria'} comprou ${blockSummary.length} bloco(s) — Total US$${totalUSD.toFixed(2)} / R$${totalBRL.toFixed(2)}`
+      )
+    }
+  }
+
+  return { purchase, saleId, blockSummary, totalBRL, totalUSD }
+}
+
+// Lista compras finalizadas da indústria
+export async function listPurchases(profile) {
+  if (!profile?.buyer_company_id) return []
+  const { data, error } = await supabase
+    .from('purchases')
+    .select('*')
+    .eq('buyer_company_id', profile.buyer_company_id)
+    .order('created_at', { ascending: false })
+  if (error) throw error
   return data || []
 }
 
