@@ -5235,7 +5235,7 @@ function IndSearchBlockPage({ profile, buyerData, onChange, toast, onCreateExter
 // ═══════════════════════════════════════════════════════════════
 // IND INSPECTION FORM MODAL — formulário de inspeção
 // ═══════════════════════════════════════════════════════════════
-function IndInspectionFormModal({ profile, block, existingInspection, onClose, onSaved, toast }) {
+function IndInspectionFormModal({ profile, block, existingInspection, inspectionId, onClose, onSaved, toast }) {
   const [photos, setPhotos] = useState(existingInspection?.photos || [])
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -5275,6 +5275,7 @@ function IndInspectionFormModal({ profile, block, existingInspection, onClose, o
     try {
       const payload = {
         original_block_id: block.id,
+        inspection_id: inspectionId || existingInspection?.inspection_id || null,
         photos,
         notes: form.notes.trim() || null,
         negotiated_value: form.negotiated_value ? parseFloat(form.negotiated_value) : null,
@@ -6848,6 +6849,1001 @@ function AddToListPicker({ profile, buyerData, itemType, itemId, onClose, onAdde
   )
 }
 
+// ═══════════════════════════════════════════════════════════════
+// IND NEW VISIT — formulário pra registrar nova visita à pedreira
+// ═══════════════════════════════════════════════════════════════
+function IndNewVisitPage({ profile, buyerData, onChange, toast, setPage, setSelectedVisitId }) {
+  const externalQuarries = buyerData?.externalQuarries || []
+  const [saving, setSaving] = useState(false)
+  const [showNewQuarry, setShowNewQuarry] = useState(false)
+  const [newQuarryName, setNewQuarryName] = useState('')
+  const [form, setForm] = useState({
+    external_quarry_id: '',
+    uses_stone_block: 'no', // 'yes' | 'no'
+    visit_date: new Date().toISOString().slice(0, 16),
+    notes: '',
+  })
+
+  const handleCreateQuarry = async () => {
+    if (!newQuarryName.trim()) { toast('Digite o nome da pedreira.', 'err'); return }
+    try {
+      const q = await api.findOrCreateExternalQuarry(profile, newQuarryName.trim())
+      toast('Pedreira cadastrada.', 'ok')
+      setShowNewQuarry(false)
+      setNewQuarryName('')
+      await (onChange && onChange())
+      setForm(prev => ({ ...prev, external_quarry_id: q.id }))
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const save = async () => {
+    if (!form.external_quarry_id) {
+      toast('Selecione ou cadastre a pedreira.', 'err'); return
+    }
+    setSaving(true)
+    try {
+      const visit = await api.createInspectionVisit(profile, {
+        external_quarry_id: form.external_quarry_id,
+        uses_stone_block: form.uses_stone_block === 'yes',
+        visit_date: form.visit_date ? new Date(form.visit_date).toISOString() : new Date().toISOString(),
+        notes: form.notes.trim() || null,
+      })
+      toast('Inspeção iniciada!', 'ok')
+      await (onChange && onChange())
+      // Vai direto pra tela da visita
+      if (setSelectedVisitId && setPage) {
+        setSelectedVisitId(visit.id)
+        setPage('ind_visit_detail')
+      }
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  const usaStoneBlock = form.uses_stone_block === 'yes'
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">➕ Cadastrar Inspeção</div>
+        <div className="psub">Registre uma nova visita a uma pedreira</div>
+      </div>
+
+      <div className="card" style={{ maxWidth: 640 }}>
+        <div className="cb">
+          <div className="fg">
+            <label className="fl">Pedreira *</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <select className="fc" style={{ flex: 1 }} value={form.external_quarry_id} onChange={e => setForm({ ...form, external_quarry_id: e.target.value })}>
+                <option value="">Selecione a pedreira...</option>
+                {externalQuarries.map(q => <option key={q.id} value={q.id}>{q.name}{q.location ? ` — ${q.location}` : ''}</option>)}
+              </select>
+              <button className="btn bo bsm" onClick={() => setShowNewQuarry(true)}>+ Nova</button>
+            </div>
+            {showNewQuarry && (
+              <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+                <input className="fc" placeholder="Nome da nova pedreira" value={newQuarryName} onChange={e => setNewQuarryName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleCreateQuarry() }} autoFocus />
+                <button className="btn bb bsm" onClick={handleCreateQuarry}>Criar</button>
+                <button className="btn bo bsm" onClick={() => { setShowNewQuarry(false); setNewQuarryName('') }}>×</button>
+              </div>
+            )}
+          </div>
+
+          <div className="fg">
+            <label className="fl">Data e hora da chegada *</label>
+            <input className="fc" type="datetime-local" value={form.visit_date} onChange={e => setForm({ ...form, visit_date: e.target.value })} />
+          </div>
+
+          <div className="fg">
+            <label className="fl">Esta pedreira usa o Stone Block? *</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 14px', background: form.uses_stone_block === 'no' ? 'var(--sap1)' : 'var(--haze)', border: '2px solid ' + (form.uses_stone_block === 'no' ? 'var(--sap6)' : 'transparent'), borderRadius: 8, cursor: 'pointer', flex: 1 }}>
+                <input type="radio" checked={form.uses_stone_block === 'no'} onChange={() => setForm({ ...form, uses_stone_block: 'no' })} />
+                <span style={{ fontWeight: 600 }}>Não usa</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 14px', background: form.uses_stone_block === 'yes' ? 'var(--sap1)' : 'var(--haze)', border: '2px solid ' + (form.uses_stone_block === 'yes' ? 'var(--sap6)' : 'transparent'), borderRadius: 8, cursor: 'pointer', flex: 1 }}>
+                <input type="radio" checked={form.uses_stone_block === 'yes'} onChange={() => setForm({ ...form, uses_stone_block: 'yes' })} />
+                <span style={{ fontWeight: 600 }}>Usa Stone Block</span>
+              </label>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 6, lineHeight: 1.5 }}>
+              {usaStoneBlock
+                ? '✓ Os blocos poderão ser localizados pelo código (digite ou leia QR Code).'
+                : '✓ Os blocos serão cadastrados do zero (fotos + medidas + valor).'}
+            </div>
+          </div>
+
+          <div className="fg">
+            <label className="fl">Observações da visita</label>
+            <textarea className="fc" rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}
+              placeholder="Ex: recebido por João, pedreira nova no mercado..." />
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+            <button className="btn bo" onClick={() => setPage && setPage('ind_dashboard')}>Cancelar</button>
+            <button className="btn bb" onClick={save} disabled={saving}>
+              {saving ? <><span className="spinner"></span> Iniciando</> : '🚀 Iniciar Inspeção'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND VISITS LIST — lista de todas as visitas
+// ═══════════════════════════════════════════════════════════════
+function IndVisitsListPage({ profile, buyerData, onChange, toast, setPage, setSelectedVisitId }) {
+  const visits = buyerData?.visits || []
+  const team = buyerData?.team || []
+  const externalQuarries = buyerData?.externalQuarries || []
+  const blockInspections = buyerData?.inspections || []
+  const externalBlocks = buyerData?.externalBlocks || []
+  const [filterStatus, setFilterStatus] = useState('all') // all | open | closed
+  const [filterMarker, setFilterMarker] = useState('')
+  const [filterQuarry, setFilterQuarry] = useState('')
+
+  const countBlocks = (visitId) => {
+    return blockInspections.filter(i => i.inspection_id === visitId).length +
+           externalBlocks.filter(b => b.inspection_id === visitId).length
+  }
+
+  const filtered = visits.filter(v => {
+    if (filterStatus !== 'all' && v.status !== filterStatus) return false
+    if (filterMarker && v.marker_id !== filterMarker) return false
+    if (filterQuarry && v.external_quarry_id !== filterQuarry) return false
+    return true
+  })
+
+  const open = (v) => {
+    if (setSelectedVisitId && setPage) {
+      setSelectedVisitId(v.id)
+      setPage('ind_visit_detail')
+    }
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="ptit">📋 Inspeções</div>
+            <div className="psub">{filtered.length} inspeção(ões) {filtered.length !== visits.length ? `de ${visits.length}` : ''}</div>
+          </div>
+          <button className="btn bb" onClick={() => setPage && setPage('ind_new_visit')}>
+            <Icon n="plus" s={16} c="#fff" /> Cadastrar Inspeção
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 160 }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <option value="all">Todos status</option>
+          <option value="open">🟢 Em aberto</option>
+          <option value="closed">✓ Encerradas</option>
+        </select>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterMarker} onChange={e => setFilterMarker(e.target.value)}>
+          <option value="">Todos os marcadores</option>
+          {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+          <option value="">Todas as pedreiras</option>
+          {externalQuarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+        </select>
+        {(filterStatus !== 'all' || filterMarker || filterQuarry) && (
+          <button className="btn bo bsm" onClick={() => { setFilterStatus('all'); setFilterMarker(''); setFilterQuarry('') }}>
+            <Icon n="x" s={13} /> Limpar
+          </button>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="check" s={48} /></div>
+          <div className="estit">{visits.length === 0 ? 'Nenhuma inspeção ainda' : 'Nenhuma inspeção encontrada'}</div>
+          {visits.length === 0 && (
+            <button className="btn bb" style={{ marginTop: 16 }} onClick={() => setPage && setPage('ind_new_visit')}>
+              <Icon n="plus" s={16} c="#fff" /> Cadastrar Primeira Inspeção
+            </button>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))' }}>
+          {filtered.map(v => {
+            const marker = team.find(m => m.id === v.marker_id)
+            const quarry = externalQuarries.find(q => q.id === v.external_quarry_id)
+            const blocks = countBlocks(v.id)
+            return (
+              <div key={v.id} className="card" style={{ cursor: 'pointer', borderTop: '4px solid ' + (v.status === 'open' ? 'var(--ok)' : 'var(--mist)') }} onClick={() => open(v)}>
+                <div className="cb">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15 }}>
+                      📍 {quarry?.name || '—'}
+                    </div>
+                    <span className="bdg" style={{ background: v.status === 'open' ? '#dcfce7' : 'var(--haze)', color: v.status === 'open' ? '#15803d' : 'var(--mist)', fontSize: 11 }}>
+                      {v.status === 'open' ? '🟢 Aberta' : '✓ Encerrada'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 6 }}>
+                    📅 {fmtDate(v.visit_date)}
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 6 }}>
+                    👤 {marker?.name || '—'}
+                  </div>
+                  <div style={{ fontSize: 13, marginBottom: 6 }}>
+                    🏗️ <strong>{blocks}</strong> bloco(s) inspecionado(s)
+                  </div>
+                  {v.uses_stone_block && (
+                    <div style={{ display: 'inline-block', fontSize: 10, fontWeight: 700, background: 'var(--sap1)', color: 'var(--sap7)', padding: '2px 6px', borderRadius: 4, marginTop: 4 }}>
+                      Stone Block
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND VISIT DETAIL — detalhe da visita + blocos inspecionados
+// ═══════════════════════════════════════════════════════════════
+function IndVisitDetailPage({ profile, buyerData, onChange, toast, visitId, setPage }) {
+  const visits = buyerData?.visits || []
+  const team = buyerData?.team || []
+  const externalQuarries = buyerData?.externalQuarries || []
+  const allInspections = buyerData?.inspections || []
+  const allExternals = buyerData?.externalBlocks || []
+  const [showAddBlock, setShowAddBlock] = useState(false)
+  const [originalBlocks, setOriginalBlocks] = useState({})
+
+  const visit = visits.find(v => v.id === visitId)
+  const inspectionsHere = allInspections.filter(i => i.inspection_id === visitId)
+  const externalsHere = allExternals.filter(b => b.inspection_id === visitId)
+  const totalBlocks = inspectionsHere.length + externalsHere.length
+
+  useEffect(() => {
+    const ids = [...new Set(inspectionsHere.map(i => i.original_block_id))]
+    if (ids.length === 0) return
+    ;(async () => {
+      const map = {}
+      for (const id of ids) {
+        try {
+          const { data } = await supabase.from('blocks').select('*').eq('id', id).maybeSingle()
+          if (data) {
+            map[id] = {
+              ...data,
+              photos: Array.isArray(data.photos) ? data.photos
+                : (typeof data.photos === 'string' ? (data.photos.startsWith('[') ? JSON.parse(data.photos) : [data.photos]) : []),
+            }
+          }
+        } catch (e) {}
+      }
+      setOriginalBlocks(map)
+    })()
+  }, [visitId, inspectionsHere.length])
+
+  if (!visit) {
+    return (
+      <div className="es">
+        <div className="estit">Inspeção não encontrada</div>
+        <button className="btn bb" style={{ marginTop: 16 }} onClick={() => setPage && setPage('ind_visits')}>← Voltar</button>
+      </div>
+    )
+  }
+
+  const marker = team.find(m => m.id === visit.marker_id)
+  const quarry = externalQuarries.find(q => q.id === visit.external_quarry_id)
+
+  const closeVisit = async () => {
+    if (!confirm('Encerrar esta inspeção?')) return
+    try {
+      await api.closeInspectionVisit(visit.id)
+      toast('Inspeção encerrada.', 'ok')
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const reopenVisit = async () => {
+    try {
+      await api.reopenInspectionVisit(visit.id)
+      toast('Inspeção reaberta.', 'ok')
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const removeVisit = async () => {
+    if (!confirm(`Excluir esta inspeção?\n\nOs blocos cadastrados nela NÃO serão apagados — eles continuam disponíveis mas sem vínculo com esta visita.`)) return
+    try {
+      await api.deleteInspectionVisit(visit.id)
+      toast('Inspeção excluída.', 'ok')
+      await (onChange && onChange())
+      setPage && setPage('ind_visits')
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <button className="btn bo bsm" style={{ marginBottom: 8 }} onClick={() => setPage && setPage('ind_visits')}>← Inspeções</button>
+            <div className="ptit">📍 {quarry?.name || '—'}</div>
+            <div className="psub">
+              📅 {fmtDate(visit.visit_date)} · 👤 {marker?.name || '—'} · 🏗️ {totalBlocks} bloco(s)
+              {visit.uses_stone_block && <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 700, background: 'var(--sap1)', color: 'var(--sap7)', padding: '2px 6px', borderRadius: 4, marginLeft: 8 }}>Stone Block</span>}
+            </div>
+            {visit.notes && (
+              <div style={{ background: 'var(--haze)', padding: 10, borderRadius: 8, marginTop: 10, fontSize: 13, maxWidth: 720 }}>
+                <strong>Observações:</strong> {visit.notes}
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {visit.status === 'open' ? (
+              <>
+                <button className="btn bb" onClick={() => setShowAddBlock(true)}>
+                  <Icon n="plus" s={15} c="#fff" /> Cadastrar Bloco
+                </button>
+                <button className="btn bo" onClick={closeVisit}>✓ Encerrar</button>
+              </>
+            ) : (
+              <button className="btn bo" onClick={reopenVisit}>🔓 Reabrir</button>
+            )}
+            <button className="btn bo" onClick={removeVisit} title="Excluir inspeção">
+              <Icon n="trash" s={14} c="var(--err)" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {totalBlocks === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
+          <div className="estit">Nenhum bloco inspecionado ainda</div>
+          {visit.status === 'open' && (
+            <button className="btn bb" style={{ marginTop: 16 }} onClick={() => setShowAddBlock(true)}>
+              <Icon n="plus" s={16} c="#fff" /> Cadastrar Primeiro Bloco
+            </button>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
+          {/* Blocos de inspeção (Stone Block) */}
+          {inspectionsHere.map(i => {
+            const orig = originalBlocks[i.original_block_id]
+            const photo = (i.photos && i.photos[0]) || (orig?.photos && orig.photos[0])
+            return (
+              <div key={i.id} className="card" style={{ borderTop: '4px solid var(--sap6)' }}>
+                {photo ? (
+                  <img src={photo} alt="" style={{ width: '100%', height: 160, objectFit: 'cover', display: 'block' }} />
+                ) : (
+                  <div style={{ height: 140, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
+                )}
+                <div className="cb">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{orig?.code || '?'}</div>
+                    <span className="bdg" style={{ background: 'var(--sap1)', color: 'var(--sap7)', fontSize: 10 }}>Stone Block</span>
+                  </div>
+                  <div style={{ fontSize: 13, marginBottom: 6 }}>{orig?.material || '—'}</div>
+                  {i.negotiated_value && (
+                    <div style={{ fontSize: 13, color: '#059669', fontWeight: 700 }}>
+                      Negociado: {money(i.negotiated_value, i.negotiated_currency)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+          {/* Blocos externos */}
+          {externalsHere.map(b => (
+            <div key={b.id} className="card" style={{ borderTop: '4px solid #d97706' }}>
+              {b.photos && b.photos[0] ? (
+                <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 160, objectFit: 'cover', display: 'block' }} />
+              ) : (
+                <div style={{ height: 140, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
+              )}
+              <div className="cb">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16 }}>{b.code}</div>
+                  <span className="bdg" style={{ background: '#fef3c7', color: '#d97706', fontSize: 10 }}>Externo</span>
+                </div>
+                <div style={{ fontSize: 13, marginBottom: 6 }}>{b.material}</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14, color: 'var(--sap7)' }}>
+                  {money(b.total_value, b.currency)}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showAddBlock && (
+        <AddBlockToVisitModal
+          profile={profile}
+          buyerData={buyerData}
+          visit={visit}
+          onClose={() => setShowAddBlock(false)}
+          onAdded={() => { setShowAddBlock(false); onChange && onChange() }}
+          toast={toast}
+        />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ADD BLOCK TO VISIT — modal que cadastra bloco dentro da visita
+// ═══════════════════════════════════════════════════════════════
+function AddBlockToVisitModal({ profile, buyerData, visit, onClose, onAdded, toast }) {
+  const [mode, setMode] = useState(visit.uses_stone_block ? 'search' : 'external')
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState(null)
+  const [searching, setSearching] = useState(false)
+  const [selectedBlock, setSelectedBlock] = useState(null)
+  const [showInspectionForm, setShowInspectionForm] = useState(false)
+  const [showExternalForm, setShowExternalForm] = useState(false)
+
+  const doSearch = async () => {
+    if (!query.trim()) { toast('Digite o código.', 'err'); return }
+    setSearching(true)
+    try {
+      const found = await api.searchBlockForInspection(query.trim())
+      setResults(found || [])
+    } catch (e) { toast('Erro: ' + e.message, 'err'); setResults([]) }
+    finally { setSearching(false) }
+  }
+
+  if (showInspectionForm && selectedBlock) {
+    return (
+      <IndInspectionFormModal
+        profile={profile}
+        block={selectedBlock}
+        inspectionId={visit.id}
+        onClose={() => { setShowInspectionForm(false); setSelectedBlock(null) }}
+        onSaved={() => { setShowInspectionForm(false); setSelectedBlock(null); onAdded && onAdded(); toast('Bloco inspecionado!', 'ok') }}
+        toast={toast}
+      />
+    )
+  }
+
+  if (showExternalForm) {
+    return (
+      <IndExternalBlockFormModal
+        profile={profile}
+        buyerData={buyerData}
+        visit={visit}
+        onClose={() => setShowExternalForm(false)}
+        onSaved={() => { setShowExternalForm(false); onAdded && onAdded(); toast('Bloco cadastrado!', 'ok') }}
+        toast={toast}
+      />
+    )
+  }
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div className="mtit">🏗️ Cadastrar Bloco</div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          {visit.uses_stone_block ? (
+            <>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 14, borderBottom: '1px solid var(--fog)', paddingBottom: 8 }}>
+                <button className={'btn ' + (mode === 'search' ? 'bb' : 'bo') + ' bsm'} onClick={() => setMode('search')}>
+                  🔍 Buscar bloco da pedreira
+                </button>
+                <button className={'btn ' + (mode === 'external' ? 'bb' : 'bo') + ' bsm'} onClick={() => setMode('external')}>
+                  ✍️ Cadastrar bloco novo
+                </button>
+              </div>
+
+              {mode === 'search' && (
+                <>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                    <input className="fc" style={{ flex: 1, fontSize: 15, textTransform: 'uppercase' }}
+                      placeholder="Digite o código ou SB-XXXX-XXXX..."
+                      value={query} onChange={e => setQuery(e.target.value.toUpperCase())}
+                      onKeyDown={e => { if (e.key === 'Enter') doSearch() }} autoFocus />
+                    <button className="btn bb" onClick={doSearch} disabled={searching}>
+                      {searching ? <span className="spinner"></span> : 'Buscar'}
+                    </button>
+                  </div>
+
+                  {results && results.length === 0 && (
+                    <div style={{ padding: 16, background: '#fef3c7', borderRadius: 8, marginBottom: 12 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 4 }}>Bloco não encontrado</div>
+                      <div style={{ fontSize: 13, color: 'var(--mist)' }}>O código <strong>{query}</strong> não está em nenhuma pedreira Stone Block. Você pode cadastrar este bloco do zero.</div>
+                      <button className="btn bb bsm" style={{ marginTop: 10 }} onClick={() => setMode('external')}>
+                        ✍️ Cadastrar como bloco novo
+                      </button>
+                    </div>
+                  )}
+
+                  {results && results.length > 0 && (
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      {results.map(b => {
+                        const photos = Array.isArray(b.photos) ? b.photos
+                          : (typeof b.photos === 'string' ? (b.photos.startsWith('[') ? JSON.parse(b.photos) : [b.photos]) : [])
+                        return (
+                          <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, background: 'var(--haze)', borderRadius: 8 }}>
+                            {photos[0] && <img src={photos[0]} style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 6 }} />}
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 700 }}>{b.code}</div>
+                              <div style={{ fontSize: 12, color: 'var(--mist)' }}>{b.material} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                            </div>
+                            <button className="btn bb bsm" onClick={() => { setSelectedBlock({ ...b, photos }); setShowInspectionForm(true) }}>
+                              Inspecionar
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {!results && (
+                    <div style={{ padding: 20, textAlign: 'center', color: 'var(--mist)', fontSize: 13 }}>
+                      Digite o código do bloco que está vendo (ou escaneie o QR Code do bloco)
+                    </div>
+                  )}
+                </>
+              )}
+
+              {mode === 'external' && (
+                <div style={{ padding: 16, textAlign: 'center' }}>
+                  <button className="btn bb" onClick={() => setShowExternalForm(true)}>
+                    ✍️ Abrir formulário de cadastro
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ padding: 16, textAlign: 'center' }}>
+              <div style={{ marginBottom: 16, color: 'var(--mist)' }}>
+                Esta pedreira não usa o Stone Block. Cadastre o bloco do zero.
+              </div>
+              <button className="btn bb" onClick={() => setShowExternalForm(true)}>
+                ✍️ Abrir formulário de cadastro
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EXTERNAL BLOCK FORM MODAL (variante que ja vem com inspection_id)
+// Reutiliza o conteúdo do IndExternalBlockFormPage mas como modal
+// ═══════════════════════════════════════════════════════════════
+function IndExternalBlockFormModal({ profile, buyerData, visit, onClose, onSaved, toast }) {
+  const [photos, setPhotos] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    code: '',
+    material: '',
+    classification: 'A',
+    prod_date: new Date().toISOString().slice(0, 10),
+    gross_l: '', gross_h: '', gross_w: '',
+    net_l: '', net_h: '', net_w: '',
+    currency: 'USD',
+    price_m3: '',
+    notes: '',
+  })
+
+  const grossVolume = calcVolume(form.gross_l, form.gross_h, form.gross_w)
+  const netVolume = calcVolume(form.net_l, form.net_h, form.net_w)
+  const totalValue = netVolume * (parseFloat(form.price_m3) || 0)
+
+  const handlePhotoUpload = async (e) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+    if (photos.length + files.length > 4) { toast('Máximo 4 fotos.', 'err'); return }
+    setUploading(true)
+    try {
+      const uploaded = []
+      for (const f of files) {
+        const compressed = await compressIndImage(f)
+        const url = await api.uploadInspectionPhoto(profile, compressed, form.code || 'external')
+        uploaded.push(url)
+      }
+      setPhotos([...photos, ...uploaded])
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setUploading(false); e.target.value = '' }
+  }
+
+  const removePhoto = (idx) => setPhotos(photos.filter((_, i) => i !== idx))
+
+  const save = async () => {
+    if (!form.code.trim()) { toast('Código obrigatório.', 'err'); return }
+    if (!form.material.trim()) { toast('Material obrigatório.', 'err'); return }
+    if (photos.length === 0) { toast('Adicione ao menos 1 foto.', 'err'); return }
+    setSaving(true)
+    try {
+      await api.createExternalBlock(profile, {
+        external_quarry_id: visit.external_quarry_id,
+        inspection_id: visit.id,
+        code: form.code.trim().toUpperCase(),
+        material: form.material.trim(),
+        classification: form.classification,
+        prod_date: form.prod_date || null,
+        gross_l: parseFloat(form.gross_l) || null,
+        gross_h: parseFloat(form.gross_h) || null,
+        gross_w: parseFloat(form.gross_w) || null,
+        gross_volume: grossVolume || null,
+        net_l: parseFloat(form.net_l) || null,
+        net_h: parseFloat(form.net_h) || null,
+        net_w: parseFloat(form.net_w) || null,
+        net_volume: netVolume || null,
+        currency: form.currency,
+        price_m3: parseFloat(form.price_m3) || null,
+        total_value: totalValue || null,
+        photos,
+        notes: form.notes.trim() || null,
+        status: 'pending',
+      })
+      onSaved && onSaved()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div className="mtit">🏗️ Cadastrar Bloco</div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div className="fg">
+              <label className="fl">Código *</label>
+              <input className="fc" value={form.code} onChange={e => setForm({ ...form, code: e.target.value.toUpperCase() })} style={{ textTransform: 'uppercase' }} />
+            </div>
+            <div className="fg">
+              <label className="fl">Material *</label>
+              <input className="fc" value={form.material} onChange={e => setForm({ ...form, material: e.target.value })} />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div className="fg">
+              <label className="fl">Classificação</label>
+              <select className="fc" value={form.classification} onChange={e => setForm({ ...form, classification: e.target.value })}>
+                <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>
+              </select>
+            </div>
+            <div className="fg">
+              <label className="fl">Data de produção</label>
+              <input type="date" className="fc" value={form.prod_date} onChange={e => setForm({ ...form, prod_date: e.target.value })} />
+            </div>
+          </div>
+
+          <div style={{ background: '#f3f4f6', padding: 12, borderRadius: 8, marginTop: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📐 Medidas brutas (m)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+              <input className="fc" type="number" step="0.01" placeholder="L" value={form.gross_l} onChange={e => setForm({ ...form, gross_l: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="H" value={form.gross_h} onChange={e => setForm({ ...form, gross_h: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="W" value={form.gross_w} onChange={e => setForm({ ...form, gross_w: e.target.value })} />
+            </div>
+            {grossVolume > 0 && <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700 }}>Volume bruto: {grossVolume.toFixed(2)} m³</div>}
+          </div>
+
+          <div style={{ background: 'var(--sap1)', padding: 12, borderRadius: 8, marginTop: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--sap7)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📐 Medidas líquidas (m)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+              <input className="fc" type="number" step="0.01" placeholder="L" value={form.net_l} onChange={e => setForm({ ...form, net_l: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="H" value={form.net_h} onChange={e => setForm({ ...form, net_h: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="W" value={form.net_w} onChange={e => setForm({ ...form, net_w: e.target.value })} />
+            </div>
+            {netVolume > 0 && <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700, color: 'var(--sap7)' }}>Volume líquido: {netVolume.toFixed(2)} m³</div>}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 8, marginTop: 10 }}>
+            <div className="fg">
+              <label className="fl">Moeda</label>
+              <select className="fc" value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}>
+                <option value="USD">USD (US$)</option>
+                <option value="BRL">BRL (R$)</option>
+              </select>
+            </div>
+            <div className="fg">
+              <label className="fl">Preço por m³</label>
+              <input className="fc" type="number" step="0.01" value={form.price_m3} onChange={e => setForm({ ...form, price_m3: e.target.value })} />
+            </div>
+          </div>
+
+          {totalValue > 0 && (
+            <div style={{ padding: 10, background: 'linear-gradient(135deg,#0c1a2e,#1e3a8a)', borderRadius: 8, marginTop: 6 }}>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,.7)', fontWeight: 700, textTransform: 'uppercase' }}>Valor total</div>
+              <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 22, color: '#fff' }}>{money(totalValue, form.currency)}</div>
+            </div>
+          )}
+
+          <div className="fg" style={{ marginTop: 12 }}>
+            <label className="fl">Fotos ({photos.length}/4) *</label>
+            {photos.length < 4 && (
+              <input type="file" accept="image/*" multiple capture="environment" onChange={handlePhotoUpload} disabled={uploading} style={{ fontSize: 13 }} />
+            )}
+            {uploading && <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 4 }}><span className="spinner"></span> Enviando...</div>}
+            {photos.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                {photos.map((url, i) => (
+                  <div key={i} style={{ position: 'relative' }}>
+                    <img src={url} style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6 }} />
+                    <button onClick={() => removePhoto(i)} style={{ position: 'absolute', top: -6, right: -6, background: 'var(--err)', color: '#fff', border: 'none', width: 20, height: 20, borderRadius: '50%', cursor: 'pointer', fontSize: 11 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="fg">
+            <label className="fl">Observações</label>
+            <textarea className="fc" rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+          </div>
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose}>Cancelar</button>
+          <button className="btn bb" onClick={save} disabled={saving || uploading}>
+            {saving ? <><span className="spinner"></span> Salvando</> : 'Cadastrar Bloco'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND CATALOG — vitrine unificada (todos os blocos marcados)
+// ═══════════════════════════════════════════════════════════════
+function IndCatalogPage({ profile, buyerData, onChange, toast }) {
+  const inspections = buyerData?.inspections || []
+  const externalBlocks = buyerData?.externalBlocks || []
+  const visits = buyerData?.visits || []
+  const externalQuarries = buyerData?.externalQuarries || []
+  const [search, setSearch] = useState('')
+  const [filterMaterial, setFilterMaterial] = useState('')
+  const [filterQuarry, setFilterQuarry] = useState('')
+  const [filterType, setFilterType] = useState('all') // all | sb | external
+  const [originalBlocks, setOriginalBlocks] = useState({})
+  const [detail, setDetail] = useState(null) // { type, item }
+
+  useEffect(() => {
+    const ids = [...new Set(inspections.map(i => i.original_block_id))]
+    if (ids.length === 0) return
+    ;(async () => {
+      const map = {}
+      for (const id of ids) {
+        try {
+          const { data } = await supabase.from('blocks').select('*').eq('id', id).maybeSingle()
+          if (data) {
+            map[id] = {
+              ...data,
+              photos: Array.isArray(data.photos) ? data.photos
+                : (typeof data.photos === 'string' ? (data.photos.startsWith('[') ? JSON.parse(data.photos) : [data.photos]) : []),
+            }
+          }
+        } catch (e) {}
+      }
+      setOriginalBlocks(map)
+    })()
+  }, [inspections.length])
+
+  // Normaliza pra um formato unificado
+  const items = []
+  inspections.forEach(i => {
+    const orig = originalBlocks[i.original_block_id]
+    const visit = visits.find(v => v.id === i.inspection_id)
+    const quarry = visit ? externalQuarries.find(q => q.id === visit.external_quarry_id) : null
+    items.push({
+      type: 'inspection',
+      id: i.id,
+      code: orig?.code || '?',
+      material: orig?.material || '—',
+      classification: orig?.classification || '—',
+      volume: orig?.net_volume || 0,
+      value: i.negotiated_value || orig?.total_value,
+      currency: i.negotiated_currency || orig?.currency,
+      photos: (i.photos && i.photos.length > 0) ? i.photos : (orig?.photos || []),
+      photoCount: ((i.photos || []).length) + ((orig?.photos || []).length),
+      quarry_name: quarry?.name || '—',
+      quarry_id: visit?.external_quarry_id,
+      original: orig,
+      inspection: i,
+      visit,
+    })
+  })
+  externalBlocks.forEach(b => {
+    const visit = visits.find(v => v.id === b.inspection_id)
+    const quarry = externalQuarries.find(q => q.id === b.external_quarry_id)
+    items.push({
+      type: 'external',
+      id: b.id,
+      code: b.code,
+      material: b.material,
+      classification: b.classification,
+      volume: b.net_volume || 0,
+      value: b.total_value,
+      currency: b.currency,
+      photos: b.photos || [],
+      photoCount: (b.photos || []).length,
+      quarry_name: quarry?.name || '—',
+      quarry_id: b.external_quarry_id,
+      block: b,
+      visit,
+    })
+  })
+
+  // Aplica filtros
+  const filtered = items.filter(it => {
+    if (filterType === 'sb' && it.type !== 'inspection') return false
+    if (filterType === 'external' && it.type !== 'external') return false
+    if (search && !(it.code || '').toLowerCase().includes(search.toLowerCase())) return false
+    if (filterMaterial && it.material !== filterMaterial) return false
+    if (filterQuarry && it.quarry_id !== filterQuarry) return false
+    return true
+  })
+
+  const allMaterials = [...new Set(items.map(it => it.material).filter(Boolean))].sort()
+  const hasFilter = search || filterMaterial || filterQuarry || filterType !== 'all'
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">🛍️ Catálogo</div>
+        <div className="psub">{filtered.length} bloco(s) {hasFilter ? `de ${items.length}` : 'inspecionado(s)'}</div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <input className="fc" style={{ flex: '0 1 200px', fontSize: 13, padding: '7px 12px', textTransform: 'uppercase' }}
+          placeholder="🔍 Código..." value={search} onChange={e => setSearch(e.target.value.toUpperCase())} />
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 150 }} value={filterType} onChange={e => setFilterType(e.target.value)}>
+          <option value="all">Todos os tipos</option>
+          <option value="sb">Stone Block</option>
+          <option value="external">Externos</option>
+        </select>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+          <option value="">Todos os materiais</option>
+          {allMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+          <option value="">Todas as pedreiras</option>
+          {externalQuarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+        </select>
+        {hasFilter && (
+          <button className="btn bo bsm" onClick={() => { setSearch(''); setFilterMaterial(''); setFilterQuarry(''); setFilterType('all') }}>
+            <Icon n="x" s={13} /> Limpar
+          </button>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
+          <div className="estit">{items.length === 0 ? 'Catálogo vazio' : 'Nenhum bloco encontrado'}</div>
+          {items.length === 0 && (
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8 }}>
+              Os blocos aparecem aqui à medida que os marcadores os inspecionam.
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))' }}>
+          {filtered.map(it => (
+            <div key={it.type + ':' + it.id} className="card" style={{ cursor: 'pointer', borderTop: `4px solid ${it.type === 'inspection' ? 'var(--sap6)' : '#d97706'}` }} onClick={() => setDetail(it)}>
+              {it.photos[0] ? (
+                <div style={{ position: 'relative' }}>
+                  <img src={it.photos[0]} alt={it.code} style={{ width: '100%', height: 200, objectFit: 'cover', display: 'block' }} />
+                  {it.photoCount > 1 && (
+                    <div style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,.65)', color: '#fff', padding: '3px 9px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>
+                      📷 {it.photoCount}
+                    </div>
+                  )}
+                  <div style={{ position: 'absolute', top: 8, left: 8, background: it.type === 'inspection' ? 'var(--sap6)' : '#d97706', color: '#fff', padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
+                    {it.type === 'inspection' ? 'STONE BLOCK' : 'EXTERNO'}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ height: 180, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
+              )}
+              <div className="cb">
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{it.code}</div>
+                <div style={{ fontSize: 13, marginBottom: 4 }}>{it.material}</div>
+                <div style={{ fontSize: 12, color: 'var(--mist)', marginBottom: 4 }}>📍 {it.quarry_name}</div>
+                <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 6 }}>Classif. {it.classification} · {it.volume.toFixed(2)} m³</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--sap7)' }}>
+                  {it.value ? money(it.value, it.currency) : '—'}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {detail && (
+        detail.type === 'inspection' ? (
+          <IndInspectionDetailModal
+            profile={profile}
+            buyerData={buyerData}
+            inspection={detail.inspection}
+            original={detail.original}
+            marker={(buyerData?.team || []).find(m => m.id === detail.inspection.marker_id)}
+            onClose={() => setDetail(null)}
+            onDelete={async () => {
+              if (!confirm('Excluir esta inspeção?')) return
+              try { await api.deleteInspection(detail.inspection.id); toast('Excluído.', 'ok'); setDetail(null); onChange && onChange() }
+              catch (e) { toast('Erro: ' + e.message, 'err') }
+            }}
+            onChange={onChange}
+            toast={toast}
+          />
+        ) : (
+          <IndExternalBlockDetailModal
+            profile={profile}
+            buyerData={buyerData}
+            item={{ block: detail.block, quarry: externalQuarries.find(q => q.id === detail.block.external_quarry_id), marker: (buyerData?.team || []).find(m => m.id === detail.block.marker_id) }}
+            onClose={() => setDetail(null)}
+            onDelete={async () => {
+              if (!confirm('Excluir este bloco?')) return
+              try { await api.deleteExternalBlock(detail.block.id); toast('Excluído.', 'ok'); setDetail(null); onChange && onChange() }
+              catch (e) { toast('Erro: ' + e.message, 'err') }
+            }}
+            onChange={onChange}
+            toast={toast}
+          />
+        )
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND CARTS — placeholder para próxima etapa (Etapa 5)
+// ═══════════════════════════════════════════════════════════════
+function IndCartsPage({ profile, buyerData, onChange, toast }) {
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">🛒 Carrinho</div>
+        <div className="psub">Em breve</div>
+      </div>
+      <div className="card" style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: 20 }}>
+        <div style={{ fontWeight: 700, color: '#854d0e', marginBottom: 8 }}>🚧 Funcionalidade em construção</div>
+        <div style={{ fontSize: 13, color: '#92400e', lineHeight: 1.6 }}>
+          O Carrinho permitirá selecionar blocos do catálogo, montar uma lista de compra
+          e gerar o romaneio em PDF para enviar à pedreira. Será entregue na próxima etapa.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IND PURCHASES — placeholder
+// ═══════════════════════════════════════════════════════════════
+function IndPurchasesPage({ profile, buyerData, onChange, toast }) {
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">💳 Compras</div>
+        <div className="psub">Em breve</div>
+      </div>
+      <div className="card" style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: 20 }}>
+        <div style={{ fontWeight: 700, color: '#854d0e', marginBottom: 8 }}>🚧 Funcionalidade em construção</div>
+        <div style={{ fontSize: 13, color: '#92400e', lineHeight: 1.6 }}>
+          O histórico de compras com os romaneios em PDF será entregue na próxima etapa,
+          junto com o Carrinho.
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AdminPage({ profile, toast }) {
   const [tab, setTab] = useState('buyers') // 'buyers' | 'quarries' | 'externals'
   const [buyers, setBuyers] = useState([])
@@ -7191,56 +8187,59 @@ function IndDashboardPage({ profile, buyerData, toast, setPage }) {
   if (!buyerData) {
     return <div style={{ padding: 40, textAlign: 'center', color: 'var(--mist)' }}>Carregando dados da indústria...</div>
   }
-  const { company, team, inspections, externalBlocks, lists, carts } = buyerData
+  const { company, team, inspections, externalBlocks, visits } = buyerData
+  const totalBlocks = (inspections?.length || 0) + (externalBlocks?.length || 0)
+  const openVisits = (visits || []).filter(v => v.status === 'open').length
   return (
     <div>
       <div className="ph">
         <div className="ptit">Olá, {profile.name.split(' ')[0]}!</div>
-        <div className="psub">{company?.name} · {profile.buyer_role === 'director' ? 'Diretor' : profile.buyer_role === 'buyer' ? 'Comprador' : profile.buyer_role === 'marker' ? 'Marcador' : 'Assistente'}</div>
+        <div className="psub">{company?.name} · {profile.buyer_role === 'director' ? 'Diretor' : profile.buyer_role === 'marker' ? 'Marcador' : 'Assistente'}</div>
       </div>
 
-      {/* Botão grande de buscar bloco */}
-      <div className="card" style={{ marginBottom: 16, background: 'linear-gradient(135deg, var(--sap6), var(--sap7))', border: 'none', cursor: 'pointer' }} onClick={() => setPage && setPage('ind_search')}>
+      {/* Botão grande "Cadastrar Inspeção" */}
+      <div className="card" style={{ marginBottom: 16, background: 'linear-gradient(135deg, var(--sap6), var(--sap7))', border: 'none', cursor: 'pointer' }} onClick={() => setPage && setPage('ind_new_visit')}>
         <div className="cb" style={{ textAlign: 'center', padding: 26 }}>
-          <div style={{ fontSize: 36, marginBottom: 6 }}>🔍</div>
-          <div style={{ color: '#fff', fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 22 }}>Buscar Bloco</div>
-          <div style={{ color: 'rgba(255,255,255,.85)', fontSize: 13, marginTop: 4 }}>Comece uma inspeção digitando o código</div>
+          <div style={{ fontSize: 36, marginBottom: 6 }}>📍</div>
+          <div style={{ color: '#fff', fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 22 }}>Cadastrar Inspeção</div>
+          <div style={{ color: 'rgba(255,255,255,.85)', fontSize: 13, marginTop: 4 }}>Registre uma nova visita a uma pedreira</div>
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 16 }}>
-        <div className="card" style={{ cursor: 'pointer' }} onClick={() => setPage && setPage('ind_inspections')}>
+        <div className="card" style={{ cursor: 'pointer' }} onClick={() => setPage && setPage('ind_visits')}>
           <div className="cb">
-            <div className="slbl2">Blocos Inspecionados</div>
-            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{inspections?.length || 0}</div>
+            <div className="slbl2">Inspeções</div>
+            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{visits?.length || 0}</div>
+            {openVisits > 0 && <div style={{ fontSize: 11, color: '#15803d', fontWeight: 600 }}>{openVisits} em aberto</div>}
           </div>
         </div>
-        <div className="card" style={{ cursor: 'pointer' }} onClick={() => setPage && setPage('ind_external_blocks')}>
+        <div className="card" style={{ cursor: 'pointer' }} onClick={() => setPage && setPage('ind_catalog')}>
           <div className="cb">
-            <div className="slbl2">Blocos Externos</div>
-            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{externalBlocks?.length || 0}</div>
+            <div className="slbl2">Blocos no Catálogo</div>
+            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{totalBlocks}</div>
+          </div>
+        </div>
+        <div className="card" style={{ cursor: 'pointer' }} onClick={() => setPage && setPage('ind_external_quarries')}>
+          <div className="cb">
+            <div className="slbl2">Pedreiras</div>
+            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{(buyerData.externalQuarries || []).length}</div>
           </div>
         </div>
         <div className="card">
           <div className="cb">
-            <div className="slbl2">Listas de Interesse</div>
-            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{lists?.length || 0}</div>
-          </div>
-        </div>
-        <div className="card">
-          <div className="cb">
-            <div className="slbl2">Carrinhos</div>
-            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{carts?.length || 0}</div>
+            <div className="slbl2">Equipe</div>
+            <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 32 }}>{(team || []).filter(t => t.is_active !== false).length}</div>
           </div>
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <button className="btn bo" onClick={() => setPage && setPage('ind_external_form')}>
-          <Icon n="plus" s={15} /> Cadastrar Bloco Externo
+        <button className="btn bo" onClick={() => setPage && setPage('ind_catalog')}>
+          <Icon n="cube" s={15} /> Ver Catálogo
         </button>
         <button className="btn bo" onClick={() => setPage && setPage('ind_external_quarries')}>
-          <Icon n="mtn" s={15} /> Gerenciar Pedreiras
+          <Icon n="mtn" s={15} /> Pedreiras
         </button>
       </div>
     </div>
@@ -7382,6 +8381,7 @@ export default function App() {
   const [buyerData, setBuyerData] = useState(null)
   const [indPrefillCode, setIndPrefillCode] = useState('')
   const [selectedListId, setSelectedListId] = useState(null)
+  const [selectedVisitId, setSelectedVisitId] = useState(null)
 
   const showToast = useCallback((msg, type = '') => {
     setToast({ msg, type })
@@ -7538,6 +8538,7 @@ export default function App() {
     setProfile(null)
     setBuyerData(null)
     setSelectedListId(null)
+    setSelectedVisitId(null)
     setIndPrefillCode('')
     setBlocks([]); setQuarries([]); setClients([]); setPayments([]); setSales([])
     setTeam([]); setReleases([]); setCatalog([]); setOrders([]); setNotifications([]); setFavorites([])
@@ -7575,11 +8576,11 @@ export default function App() {
   if (profile.buyer_company_id) {
     NAV = [
       { p: 'ind_dashboard',         l: 'Dashboard',           i: 'grid' },
-      { p: 'ind_search',            l: 'Buscar Bloco',        i: 'cube' },
-      { p: 'ind_external_form',     l: 'Bloco Externo',       i: 'plus' },
-      { p: 'ind_inspections',       l: 'Blocos Inspecionados', i: 'check' },
-      { p: 'ind_external_blocks',   l: 'Blocos Externos',     i: 'cube' },
-      { p: 'ind_lists',             l: 'Listas de Interesse', i: 'check' },
+      { p: 'ind_new_visit',         l: 'Cadastrar Inspeção',  i: 'plus' },
+      { p: 'ind_catalog',           l: 'Catálogo',            i: 'cube' },
+      { p: 'ind_visits',            l: 'Inspeções',           i: 'check' },
+      { p: 'ind_carts',             l: 'Carrinho',            i: 'cart' },
+      { p: 'ind_purchases',         l: 'Compras',             i: 'card' },
       { p: 'ind_external_quarries', l: 'Pedreiras',           i: 'mtn' },
     ]
     if (profile.buyer_role === 'director') {
@@ -7640,6 +8641,12 @@ export default function App() {
       case 'ind_team':              return <IndTeamPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'ind_lists':             return <IndListsPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} setPage={setPage} setSelectedListId={setSelectedListId} />
       case 'ind_list_detail':       return <IndListDetailPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} listId={selectedListId} setPage={setPage} />
+      case 'ind_new_visit':         return <IndNewVisitPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} setPage={setPage} setSelectedVisitId={setSelectedVisitId} />
+      case 'ind_visits':            return <IndVisitsListPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} setPage={setPage} setSelectedVisitId={setSelectedVisitId} />
+      case 'ind_visit_detail':      return <IndVisitDetailPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} visitId={selectedVisitId} setPage={setPage} />
+      case 'ind_catalog':           return <IndCatalogPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
+      case 'ind_carts':             return <IndCartsPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
+      case 'ind_purchases':         return <IndPurchasesPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'dashboard':   return <Dashboard blocks={blocks} quarries={quarries} clients={clients} sales={sales} />
       case 'blocks':      return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
       case 'sales':       return <SalesPage profile={profile} sales={sales} blocks={blocks} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />

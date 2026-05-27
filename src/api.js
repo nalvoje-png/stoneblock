@@ -1263,6 +1263,8 @@ export async function loadBuyerCompanyData(profile) {
     lists,
     carts,
     externalQuarries,
+    visits,
+    cartItems,
   ] = await Promise.all([
     getBuyerCompany(companyId),
     supabase.from('profiles').select('*').eq('buyer_company_id', companyId).then(r => r.data || []),
@@ -1271,6 +1273,13 @@ export async function loadBuyerCompanyData(profile) {
     supabase.from('interest_lists').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []),
     supabase.from('buyer_carts').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []),
     listExternalQuarries(profile),
+    supabase.from('inspections').select('*').eq('buyer_company_id', companyId).order('visit_date', { ascending: false }).then(r => r.data || []).catch(() => []),
+    (async () => {
+      const { data: cs } = await supabase.from('buyer_carts').select('id').eq('buyer_company_id', companyId)
+      if (!cs || cs.length === 0) return []
+      const { data: items } = await supabase.from('buyer_cart_items').select('*').in('cart_id', cs.map(c => c.id))
+      return items || []
+    })(),
   ])
 
   // Carrega itens das listas
@@ -1299,7 +1308,9 @@ export async function loadBuyerCompanyData(profile) {
     lists,
     listItems,
     carts,
+    cartItems,
     externalQuarries,
+    visits,
   }
 }
 
@@ -1629,5 +1640,118 @@ export async function cancelCart(cartId) {
     .update({ status: 'cancelled' })
     .eq('id', cartId)
   if (error) throw error
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// VISITAS (INSPEÇÕES) — uma visita = um registro a uma pedreira
+// ═══════════════════════════════════════════════════════════════
+
+export async function listInspections(profile) {
+  if (!profile?.buyer_company_id) return []
+  const { data, error } = await supabase
+    .from('inspections')
+    .select('*')
+    .eq('buyer_company_id', profile.buyer_company_id)
+    .order('visit_date', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+export async function createInspectionVisit(profile, payload) {
+  if (!profile?.buyer_company_id) throw new Error('Sem indústria associada')
+  const { data, error } = await supabase
+    .from('inspections')
+    .insert({
+      buyer_company_id: profile.buyer_company_id,
+      marker_id: profile.id,
+      quarry_company_id: payload.quarry_company_id || null,
+      external_quarry_id: payload.external_quarry_id || null,
+      uses_stone_block: !!payload.uses_stone_block,
+      visit_date: payload.visit_date || new Date().toISOString(),
+      notes: payload.notes || null,
+      status: 'open',
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateInspectionVisit(id, payload) {
+  const clean = { ...payload, updated_at: new Date().toISOString() }
+  delete clean.id
+  delete clean.buyer_company_id
+  delete clean.marker_id
+  delete clean.created_at
+  const { error } = await supabase
+    .from('inspections')
+    .update(clean)
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function closeInspectionVisit(id) {
+  const { error } = await supabase
+    .from('inspections')
+    .update({ status: 'closed', closed_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function reopenInspectionVisit(id) {
+  const { error } = await supabase
+    .from('inspections')
+    .update({ status: 'open', closed_at: null })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function deleteInspectionVisit(id) {
+  const { error } = await supabase
+    .from('inspections')
+    .delete()
+    .eq('id', id)
+  if (error) throw error
+}
+
+// Lista todos os blocos (inspections + externals) de uma visita
+export async function listBlocksForInspectionVisit(inspectionId) {
+  const [{ data: insp }, { data: ext }] = await Promise.all([
+    supabase.from('block_inspections').select('*').eq('inspection_id', inspectionId),
+    supabase.from('external_blocks').select('*').eq('inspection_id', inspectionId),
+  ])
+  return {
+    inspections: (insp || []).map(i => ({
+      ...i,
+      photos: Array.isArray(i.photos) ? i.photos : (i.photos ? JSON.parse(i.photos) : []),
+    })),
+    externals: (ext || []).map(b => ({
+      ...b,
+      photos: Array.isArray(b.photos) ? b.photos : (b.photos ? JSON.parse(b.photos) : []),
+    })),
+  }
+}
+
+// ─── BUSCAR BLOCO PARA INSPEÇÃO (busca em pedreiras Stone Block) ──
+export async function searchBlockForInspection(codeOrSysCode) {
+  if (!codeOrSysCode || !codeOrSysCode.trim()) return []
+  const q = codeOrSysCode.trim()
+  // Busca em ambos: code e sys_code (se existir esta coluna)
+  const { data, error } = await supabase
+    .from('blocks')
+    .select('*')
+    .or(`code.ilike.${q},sys_code.ilike.${q}`)
+    .limit(5)
+  if (error) {
+    // Se a coluna sys_code não existir, faz fallback só por code
+    const { data: d2 } = await supabase
+      .from('blocks')
+      .select('*')
+      .ilike('code', q)
+      .limit(5)
+    return d2 || []
+  }
+  return data || []
 }
 
