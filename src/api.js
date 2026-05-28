@@ -1825,8 +1825,8 @@ export async function listIndQuarryCatalog(profile) {
   return blocks
 }
 
-// Cria notificação (helper)
-async function createNotification(userId, title, body, link) {
+// Cria notificação (helper) — versão Ind
+async function createIndNotification(userId, title, body, link) {
   try {
     await supabase.from('notifications').insert({
       user_id: userId,
@@ -2076,7 +2076,7 @@ export async function finalizeInspectionPurchase(profile, visitId, payload) {
     .select('id')
     .eq('buyer_company_id', profile.buyer_company_id)
   for (const t of (buyerTeam || [])) {
-    await createNotification(
+    await createIndNotification(
       t.id,
       '✅ Compra finalizada',
       `${buyerCompany?.name || 'A empresa'} finalizou uma compra de ${blockSummary.length} bloco(s).`
@@ -2089,7 +2089,7 @@ export async function finalizeInspectionPurchase(profile, visitId, payload) {
       .select('id')
       .or(`id.eq.${quarryCompanyId},company_id.eq.${quarryCompanyId}`)
     for (const t of (quarryTeam || [])) {
-      await createNotification(
+      await createIndNotification(
         t.id,
         '🎉 Nova venda direta!',
         `${buyerCompany?.name || 'Uma indústria'} comprou ${blockSummary.length} bloco(s) — Total US$${totalUSD.toFixed(2)} / R$${totalBRL.toFixed(2)}`
