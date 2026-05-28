@@ -1779,18 +1779,50 @@ export async function listPaymentMethodsForQuarry(quarryCompanyId) {
 
 // Lista catálogo de blocos liberados das pedreiras (todas) para a indústria visualizar
 // Hoje: marketplace público — todos os blocos com status disponível
-export async function listIndQuarryCatalog() {
-  const { data, error } = await supabase
-    .from('blocks')
-    .select('*')
-    .in('status', ['available', 'produced', 'reserve'])
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return (data || []).map(b => ({
-    ...b,
-    photos: Array.isArray(b.photos) ? b.photos
-      : (typeof b.photos === 'string' ? (b.photos.startsWith('[') ? JSON.parse(b.photos) : [b.photos]) : []),
-  }))
+export async function listIndQuarryCatalog(profile) {
+  // Mostra apenas blocos LIBERADOS para a indústria.
+  // A pedreira libera blocos para um cliente do CRM, e esse cliente está
+  // vinculado ao buyer_company_id da indústria (coluna clients.buyer_company_id).
+  if (!profile?.buyer_company_id) return []
+
+  // 1. Acha os clientes (em qualquer pedreira) vinculados a esta indústria
+  const { data: linkedClients, error: clientErr } = await supabase
+    .from('clients')
+    .select('id')
+    .eq('buyer_company_id', profile.buyer_company_id)
+  if (clientErr) {
+    console.warn('Erro ao buscar clientes vinculados:', clientErr)
+    return []
+  }
+  if (!linkedClients || linkedClients.length === 0) return []
+
+  const clientIds = linkedClients.map(c => c.id)
+
+  // 2. Acha os block_releases para esses clientes
+  const { data: releases, error: relErr } = await supabase
+    .from('block_releases')
+    .select('block:blocks(*, quarry:quarries(name, location))')
+    .in('client_id', clientIds)
+  if (relErr) {
+    console.warn('Erro ao buscar releases:', relErr)
+    return []
+  }
+
+  // 3. Deduplica blocos (um bloco pode estar liberado pra mais de um cliente da mesma indústria)
+  const seen = new Set()
+  const blocks = []
+  for (const r of (releases || [])) {
+    const b = r.block
+    if (!b || seen.has(b.id)) continue
+    seen.add(b.id)
+    blocks.push({
+      ...b,
+      quarry_name: b.quarry?.name || null,
+      photos: Array.isArray(b.photos) ? b.photos
+        : (typeof b.photos === 'string' ? (b.photos.startsWith('[') ? JSON.parse(b.photos) : [b.photos]) : []),
+    })
+  }
+  return blocks
 }
 
 // Cria notificação (helper)

@@ -1413,7 +1413,7 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
               </div>
 
               <div style={{ background: 'var(--haze)', padding: 14, borderRadius: 8, marginBottom: 14 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 10 }}>Medidas Brutas (m)</div>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--mist)', marginBottom: 10 }}>Medidas Brutas</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
                   <input className="fc" type="number" step="0.01" placeholder="Comp." value={form.gross_l} onChange={e => setForm({ ...form, gross_l: e.target.value })} />
                   <input className="fc" type="number" step="0.01" placeholder="Alt." value={form.gross_h} onChange={e => setForm({ ...form, gross_h: e.target.value })} />
@@ -1423,7 +1423,7 @@ function BlocksPage({ profile, blocks, quarries, clients, payments, onChange, to
               </div>
 
               <div style={{ background: '#dcfce7', padding: 14, borderRadius: 8, marginBottom: 14 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: '#15803d', marginBottom: 10 }}>Medidas Líquidas (m)</div>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: '#15803d', marginBottom: 10 }}>Medidas Líquidas</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
                   <input className="fc" type="number" step="0.01" placeholder="Comp." value={form.net_l} onChange={e => setForm({ ...form, net_l: e.target.value })} />
                   <input className="fc" type="number" step="0.01" placeholder="Alt." value={form.net_h} onChange={e => setForm({ ...form, net_h: e.target.value })} />
@@ -5420,7 +5420,7 @@ function IndInspectionFormModal({ profile, block, existingInspection, inspection
                     <option value="USD">USD (US$)</option>
                     <option value="BRL">BRL (R$)</option>
                   </select>
-                  <input className="fc" type="number" step="0.01" value={form.negotiated_value} onChange={e => setForm({ ...form, negotiated_value: e.target.value })} placeholder="0.00" />
+                  <input className="fc" type="number" step="0.01" value={form.negotiated_value} onChange={e => setForm({ ...form, negotiated_value: e.target.value })} placeholder="1800.00" />
                 </div>
               </div>
 
@@ -5430,9 +5430,9 @@ function IndInspectionFormModal({ profile, block, existingInspection, inspection
                   📐 Medidas brutas negociadas
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-                  <input className="fc" type="number" step="0.01" placeholder="C" value={form.negotiated_gross_l} onChange={e => setForm({ ...form, negotiated_gross_l: e.target.value })} />
-                  <input className="fc" type="number" step="0.01" placeholder="A" value={form.negotiated_gross_h} onChange={e => setForm({ ...form, negotiated_gross_h: e.target.value })} />
-                  <input className="fc" type="number" step="0.01" placeholder="L" value={form.negotiated_gross_w} onChange={e => setForm({ ...form, negotiated_gross_w: e.target.value })} />
+                  <input className="fc" type="number" step="0.01" placeholder="comp" value={form.negotiated_gross_l} onChange={e => setForm({ ...form, negotiated_gross_l: e.target.value })} />
+                  <input className="fc" type="number" step="0.01" placeholder="alt" value={form.negotiated_gross_h} onChange={e => setForm({ ...form, negotiated_gross_h: e.target.value })} />
+                  <input className="fc" type="number" step="0.01" placeholder="larg" value={form.negotiated_gross_w} onChange={e => setForm({ ...form, negotiated_gross_w: e.target.value })} />
                 </div>
                 {negotiatedGrossVolume > 0 && (
                   <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700 }}>Volume bruto: {negotiatedGrossVolume.toFixed(2)} m³</div>
@@ -5445,9 +5445,9 @@ function IndInspectionFormModal({ profile, block, existingInspection, inspection
                   📐 Medidas líquidas negociadas
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-                  <input className="fc" type="number" step="0.01" placeholder="C" value={form.negotiated_l} onChange={e => setForm({ ...form, negotiated_l: e.target.value })} />
-                  <input className="fc" type="number" step="0.01" placeholder="A" value={form.negotiated_h} onChange={e => setForm({ ...form, negotiated_h: e.target.value })} />
-                  <input className="fc" type="number" step="0.01" placeholder="L" value={form.negotiated_w} onChange={e => setForm({ ...form, negotiated_w: e.target.value })} />
+                  <input className="fc" type="number" step="0.01" placeholder="comp" value={form.negotiated_l} onChange={e => setForm({ ...form, negotiated_l: e.target.value })} />
+                  <input className="fc" type="number" step="0.01" placeholder="alt" value={form.negotiated_h} onChange={e => setForm({ ...form, negotiated_h: e.target.value })} />
+                  <input className="fc" type="number" step="0.01" placeholder="larg" value={form.negotiated_w} onChange={e => setForm({ ...form, negotiated_w: e.target.value })} />
                 </div>
                 {negotiatedNetVolume > 0 && (
                   <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700, color: '#15803d' }}>Volume líquido: {negotiatedNetVolume.toFixed(2)} m³</div>
@@ -5622,21 +5622,21 @@ function IndExternalBlockFormPage({ profile, buyerData, onChange, toast, prefill
 
           {/* Medidas */}
           <div style={{ background: '#f3f4f6', padding: 12, borderRadius: 8, marginTop: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📐 Medidas brutas (m)</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📐 Medidas brutas</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-              <input className="fc" type="number" step="0.01" placeholder="L" value={form.gross_l} onChange={e => setForm({ ...form, gross_l: e.target.value })} />
-              <input className="fc" type="number" step="0.01" placeholder="H" value={form.gross_h} onChange={e => setForm({ ...form, gross_h: e.target.value })} />
-              <input className="fc" type="number" step="0.01" placeholder="W" value={form.gross_w} onChange={e => setForm({ ...form, gross_w: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="comp" value={form.gross_l} onChange={e => setForm({ ...form, gross_l: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="alt" value={form.gross_h} onChange={e => setForm({ ...form, gross_h: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="larg" value={form.gross_w} onChange={e => setForm({ ...form, gross_w: e.target.value })} />
             </div>
             {grossVolume > 0 && <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700 }}>Volume bruto: {grossVolume.toFixed(2)} m³</div>}
           </div>
 
           <div style={{ background: 'var(--sap1)', padding: 12, borderRadius: 8, marginTop: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--sap7)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📐 Medidas líquidas (m)</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--sap7)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📐 Medidas líquidas</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-              <input className="fc" type="number" step="0.01" placeholder="L" value={form.net_l} onChange={e => setForm({ ...form, net_l: e.target.value })} />
-              <input className="fc" type="number" step="0.01" placeholder="H" value={form.net_h} onChange={e => setForm({ ...form, net_h: e.target.value })} />
-              <input className="fc" type="number" step="0.01" placeholder="W" value={form.net_w} onChange={e => setForm({ ...form, net_w: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="comp" value={form.net_l} onChange={e => setForm({ ...form, net_l: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="alt" value={form.net_h} onChange={e => setForm({ ...form, net_h: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="larg" value={form.net_w} onChange={e => setForm({ ...form, net_w: e.target.value })} />
             </div>
             {netVolume > 0 && <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700, color: 'var(--sap7)' }}>Volume líquido: {netVolume.toFixed(2)} m³</div>}
           </div>
@@ -7622,21 +7622,21 @@ function IndExternalBlockFormModal({ profile, buyerData, visit, onClose, onSaved
           </div>
 
           <div style={{ background: '#f3f4f6', padding: 12, borderRadius: 8, marginTop: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📐 Medidas brutas (m)</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📐 Medidas brutas</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-              <input className="fc" type="number" step="0.01" placeholder="L" value={form.gross_l} onChange={e => setForm({ ...form, gross_l: e.target.value })} />
-              <input className="fc" type="number" step="0.01" placeholder="H" value={form.gross_h} onChange={e => setForm({ ...form, gross_h: e.target.value })} />
-              <input className="fc" type="number" step="0.01" placeholder="W" value={form.gross_w} onChange={e => setForm({ ...form, gross_w: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="comp" value={form.gross_l} onChange={e => setForm({ ...form, gross_l: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="alt" value={form.gross_h} onChange={e => setForm({ ...form, gross_h: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="larg" value={form.gross_w} onChange={e => setForm({ ...form, gross_w: e.target.value })} />
             </div>
             {grossVolume > 0 && <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700 }}>Volume bruto: {grossVolume.toFixed(2)} m³</div>}
           </div>
 
           <div style={{ background: 'var(--sap1)', padding: 12, borderRadius: 8, marginTop: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--sap7)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📐 Medidas líquidas (m)</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--sap7)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📐 Medidas líquidas</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-              <input className="fc" type="number" step="0.01" placeholder="L" value={form.net_l} onChange={e => setForm({ ...form, net_l: e.target.value })} />
-              <input className="fc" type="number" step="0.01" placeholder="H" value={form.net_h} onChange={e => setForm({ ...form, net_h: e.target.value })} />
-              <input className="fc" type="number" step="0.01" placeholder="W" value={form.net_w} onChange={e => setForm({ ...form, net_w: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="comp" value={form.net_l} onChange={e => setForm({ ...form, net_l: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="alt" value={form.net_h} onChange={e => setForm({ ...form, net_h: e.target.value })} />
+              <input className="fc" type="number" step="0.01" placeholder="larg" value={form.net_w} onChange={e => setForm({ ...form, net_w: e.target.value })} />
             </div>
             {netVolume > 0 && <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700, color: 'var(--sap7)' }}>Volume líquido: {netVolume.toFixed(2)} m³</div>}
           </div>
@@ -7917,7 +7917,7 @@ function IndQuarryCatalogPage({ profile, buyerData, toast }) {
     ;(async () => {
       setLoading(true)
       try {
-        const data = await api.listIndQuarryCatalog()
+        const data = await api.listIndQuarryCatalog(profile)
         setBlocks(data || [])
       } catch (e) { toast('Erro ao carregar catálogo: ' + e.message, 'err') }
       finally { setLoading(false) }
@@ -7958,7 +7958,13 @@ function IndQuarryCatalogPage({ profile, buyerData, toast }) {
       ) : filtered.length === 0 ? (
         <div className="es">
           <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
-          <div className="estit">{blocks.length === 0 ? 'Catálogo vazio' : 'Nenhum bloco encontrado'}</div>
+          <div className="estit">{blocks.length === 0 ? 'Nenhum bloco liberado ainda' : 'Nenhum bloco encontrado'}</div>
+          {blocks.length === 0 && (
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8, maxWidth: 420, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.5 }}>
+              Aqui aparecem os blocos que as pedreiras Stone Block liberaram para a sua empresa.
+              Peça à pedreira para liberar o catálogo para vocês.
+            </div>
+          )}
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))' }}>
@@ -8213,17 +8219,240 @@ function FinalizeInspectionPurchaseModal({ profile, buyerData, visit, onClose, o
 }
 
 // ═══════════════════════════════════════════════════════════════
-// IND CARTS — placeholder (mantido por compatibilidade da rota)
+// IND BOUGHT BLOCKS — lista de blocos comprados (bloco a bloco)
 // ═══════════════════════════════════════════════════════════════
-function IndCartsPage({ profile, buyerData, onChange, toast }) {
+function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
+  const purchases = buyerData?.purchases || []
+  const visits = buyerData?.visits || []
+  const inspections = buyerData?.inspections || []
+  const externalBlocks = buyerData?.externalBlocks || []
+  const team = buyerData?.team || []
+  const externalQuarries = buyerData?.externalQuarries || []
+
+  const [filterPeriod, setFilterPeriod] = useState('all')
+  const [dtInicio, setDtInicio] = useState('')
+  const [dtFim, setDtFim] = useState('')
+  const [filterMarker, setFilterMarker] = useState('')
+  const [filterQuarry, setFilterQuarry] = useState('')
+  const [filterMaterial, setFilterMaterial] = useState('')
+  const [search, setSearch] = useState('')
+  const [originalBlocks, setOriginalBlocks] = useState({})
+
+  // Só inspeções que pertencem a compras finalizadas
+  const finalizedInspectionIds = new Set(purchases.map(p => p.inspection_id))
+
+  // Carrega blocos originais das inspeções
+  useEffect(() => {
+    const relevantInsp = inspections.filter(i => finalizedInspectionIds.has(i.inspection_id))
+    const ids = [...new Set(relevantInsp.map(i => i.original_block_id))]
+    if (ids.length === 0) return
+    ;(async () => {
+      const map = {}
+      for (const id of ids) {
+        try {
+          const { data } = await supabase.from('blocks').select('*').eq('id', id).maybeSingle()
+          if (data) {
+            map[id] = {
+              ...data,
+              photos: Array.isArray(data.photos) ? data.photos
+                : (typeof data.photos === 'string' ? (data.photos.startsWith('[') ? JSON.parse(data.photos) : [data.photos]) : []),
+            }
+          }
+        } catch (e) {}
+      }
+      setOriginalBlocks(map)
+    })()
+  }, [inspections.length, purchases.length])
+
+  // Monta lista unificada de blocos comprados
+  const items = []
+  inspections.filter(i => finalizedInspectionIds.has(i.inspection_id)).forEach(i => {
+    const orig = originalBlocks[i.original_block_id]
+    const purchase = purchases.find(p => p.inspection_id === i.inspection_id)
+    const visit = visits.find(v => v.id === i.inspection_id)
+    const quarry = visit ? externalQuarries.find(q => q.id === visit.external_quarry_id) : null
+    const marker = visit ? team.find(m => m.id === visit.marker_id) : null
+    items.push({
+      type: 'inspection',
+      id: i.id,
+      code: orig?.code || '?',
+      material: orig?.material || '—',
+      classification: orig?.classification,
+      volume: orig?.net_volume || 0,
+      value: i.negotiated_value || orig?.total_value,
+      currency: i.negotiated_currency || orig?.currency,
+      photo: (i.photos && i.photos[0]) || (orig?.photos && orig.photos[0]),
+      quarry_name: quarry?.name || '—',
+      quarry_id: visit?.external_quarry_id,
+      marker_id: visit?.marker_id,
+      marker_name: marker?.name || '—',
+      date: purchase?.created_at,
+      purchase,
+    })
+  })
+  externalBlocks.filter(b => finalizedInspectionIds.has(b.inspection_id)).forEach(b => {
+    const purchase = purchases.find(p => p.inspection_id === b.inspection_id)
+    const visit = visits.find(v => v.id === b.inspection_id)
+    const quarry = externalQuarries.find(q => q.id === b.external_quarry_id)
+    const marker = visit ? team.find(m => m.id === visit.marker_id) : null
+    items.push({
+      type: 'external',
+      id: b.id,
+      code: b.code,
+      material: b.material,
+      classification: b.classification,
+      volume: b.net_volume || 0,
+      value: b.total_value,
+      currency: b.currency,
+      photo: b.photos && b.photos[0],
+      quarry_name: quarry?.name || '—',
+      quarry_id: b.external_quarry_id,
+      marker_id: visit?.marker_id,
+      marker_name: marker?.name || '—',
+      date: purchase?.created_at,
+      purchase,
+    })
+  })
+
+  const matchesPeriod = (date) => {
+    if (filterPeriod === 'all' || !date) return true
+    const d = new Date(date)
+    const now = new Date()
+    if (filterPeriod === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+    if (filterPeriod === 'last_month') {
+      const last = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      return d.getMonth() === last.getMonth() && d.getFullYear() === last.getFullYear()
+    }
+    if (filterPeriod === 'year') return d.getFullYear() === now.getFullYear()
+    if (filterPeriod === 'custom') {
+      if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
+      if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+      return true
+    }
+    return true
+  }
+
+  const filtered = items.filter(it => {
+    if (!matchesPeriod(it.date)) return false
+    if (filterMarker && it.marker_id !== filterMarker) return false
+    if (filterQuarry && it.quarry_id !== filterQuarry) return false
+    if (filterMaterial && it.material !== filterMaterial) return false
+    if (search && !(it.code || '').toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  })
+
+  const allMaterials = [...new Set(items.map(it => it.material).filter(Boolean))].sort()
+  const hasFilter = filterPeriod !== 'all' || filterMarker || filterQuarry || filterMaterial || search || dtInicio || dtFim
+
+  // Totais
+  let totalUSD = 0, totalBRL = 0
+  filtered.forEach(it => {
+    if ((it.currency || 'USD') === 'USD') totalUSD += Number(it.value) || 0
+    else totalBRL += Number(it.value) || 0
+  })
+
   return (
     <div>
       <div className="ph">
-        <div className="ptit">🛒 Carrinho</div>
+        <div className="ptit">🧱 Blocos Comprados</div>
+        <div className="psub">{filtered.length} bloco(s){hasFilter ? ` de ${items.length}` : ''}</div>
       </div>
-      <div className="card" style={{ padding: 20 }}>
-        <div style={{ fontSize: 13, color: 'var(--mist)' }}>Funcionalidade removida — a compra é finalizada direto na inspeção.</div>
+
+      {/* Totais */}
+      {(totalUSD > 0 || totalBRL > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12, marginBottom: 16 }}>
+          {totalUSD > 0 && (
+            <div className="card" style={{ background: 'linear-gradient(135deg,#10b981,#059669)', border: 'none' }}>
+              <div className="cb">
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Total US$</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 22, color: '#fff' }}>{money(totalUSD, 'USD')}</div>
+              </div>
+            </div>
+          )}
+          {totalBRL > 0 && (
+            <div className="card" style={{ background: 'linear-gradient(135deg,#0c1a2e,#1e3a8a)', border: 'none' }}>
+              <div className="cb">
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Total R$</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 22, color: '#fff' }}>{money(totalBRL, 'BRL')}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Filtros */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="cb" style={{ padding: '12px 14px' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Filtros:</span>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 170 }} value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
+              <option value="all">Todos os períodos</option>
+              <option value="month">Mês atual</option>
+              <option value="last_month">Mês anterior</option>
+              <option value="year">Ano atual</option>
+              <option value="custom">Personalizado</option>
+            </select>
+            {filterPeriod === 'custom' && (
+              <>
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} onChange={e => setDtInicio(e.target.value)} />
+                <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} onChange={e => setDtFim(e.target.value)} />
+              </>
+            )}
+            <input className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 140, textTransform: 'uppercase' }} placeholder="🔍 Código..." value={search} onChange={e => setSearch(e.target.value.toUpperCase())} />
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterMarker} onChange={e => setFilterMarker(e.target.value)}>
+              <option value="">Todos os marcadores</option>
+              {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
+              <option value="">Todas as pedreiras</option>
+              {externalQuarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+            </select>
+            <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 180 }} value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+              <option value="">Todos os materiais</option>
+              {allMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            {hasFilter && (
+              <button className="btn bo bsm" onClick={() => { setFilterPeriod('all'); setFilterMarker(''); setFilterQuarry(''); setFilterMaterial(''); setSearch(''); setDtInicio(''); setDtFim('') }}>
+                <Icon n="x" s={13} /> Limpar
+              </button>
+            )}
+          </div>
+        </div>
       </div>
+
+      {filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="cube" s={48} /></div>
+          <div className="estit">{items.length === 0 ? 'Nenhum bloco comprado ainda' : 'Nenhum bloco encontrado'}</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))' }}>
+          {filtered.map(it => (
+            <div key={it.type + ':' + it.id} className="card" style={{ borderTop: `4px solid ${it.type === 'inspection' ? 'var(--sap6)' : '#d97706'}` }}>
+              {it.photo ? (
+                <div style={{ position: 'relative' }}>
+                  <img src={it.photo} alt={it.code} style={{ width: '100%', height: 180, objectFit: 'cover', display: 'block' }} />
+                  <div style={{ position: 'absolute', top: 8, left: 8, background: '#10b981', color: '#fff', padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
+                    ✓ COMPRADO
+                  </div>
+                </div>
+              ) : (
+                <div style={{ height: 160, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
+              )}
+              <div className="cb">
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{it.code}</div>
+                <div style={{ fontSize: 13, marginBottom: 4 }}>{it.material}</div>
+                <div style={{ fontSize: 12, color: 'var(--mist)', marginBottom: 2 }}>📍 {it.quarry_name}</div>
+                <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 2 }}>👤 {it.marker_name}</div>
+                <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 6 }}>📅 {fmtDate(it.date)} · {it.volume.toFixed(2)} m³</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--sap7)' }}>
+                  {it.value ? money(it.value, it.currency) : '—'}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -9296,6 +9525,7 @@ export default function App() {
       { p: 'ind_catalog',           l: 'Catálogo Interno',    i: 'cube' },
       { p: 'ind_visits',            l: 'Inspeções',           i: 'check' },
       { p: 'ind_purchases',         l: 'Compras',             i: 'card' },
+      { p: 'ind_bought_blocks',     l: 'Blocos Comprados',    i: 'cube' },
       { p: 'ind_external_quarries', l: 'Pedreiras',           i: 'mtn' },
     ]
     if (profile.buyer_role === 'director') {
@@ -9361,7 +9591,7 @@ export default function App() {
       case 'ind_visit_detail':      return <IndVisitDetailPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} visitId={selectedVisitId} setPage={setPage} />
       case 'ind_quarry_catalog':    return <IndQuarryCatalogPage profile={profile} buyerData={buyerData} toast={showToast} />
       case 'ind_catalog':           return <IndCatalogPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
-      case 'ind_carts':             return <IndCartsPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
+      case 'ind_bought_blocks':     return <IndBoughtBlocksPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'ind_purchases':         return <IndPurchasesPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'dashboard':   return <Dashboard blocks={blocks} quarries={quarries} clients={clients} sales={sales} />
       case 'blocks':      return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
