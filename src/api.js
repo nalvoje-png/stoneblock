@@ -1453,19 +1453,40 @@ export async function uploadInspectionPhoto(profile, file, refCode) {
 
 // ─── CRIAR INSPEÇÃO DE BLOCO (pedreira cadastrada) ──────────────
 export async function createInspection(profile, payload) {
+  // DIAGNÓSTICO: rastrear inspection_id
+  console.log('[createInspection] payload recebido:', {
+    original_block_id: payload.original_block_id,
+    inspection_id: payload.inspection_id,
+    buyer_company_id: profile?.buyer_company_id,
+  })
+
+  // Calcula volumes automaticamente se medidas estiverem presentes
+  const grossVol = (payload.negotiated_gross_l && payload.negotiated_gross_h && payload.negotiated_gross_w)
+    ? parseFloat(payload.negotiated_gross_l) * parseFloat(payload.negotiated_gross_h) * parseFloat(payload.negotiated_gross_w)
+    : null
+  const netVol = (payload.negotiated_l && payload.negotiated_h && payload.negotiated_w)
+    ? parseFloat(payload.negotiated_l) * parseFloat(payload.negotiated_h) * parseFloat(payload.negotiated_w)
+    : null
+
   const { data, error } = await supabase
     .from('block_inspections')
     .insert({
       original_block_id: payload.original_block_id,
+      inspection_id: payload.inspection_id || null,
       buyer_company_id: profile.buyer_company_id,
       marker_id: profile.id,
       photos: payload.photos || [],
       notes: payload.notes || null,
       negotiated_value: payload.negotiated_value || null,
       negotiated_currency: payload.negotiated_currency || 'USD',
+      negotiated_gross_l: payload.negotiated_gross_l || null,
+      negotiated_gross_h: payload.negotiated_gross_h || null,
+      negotiated_gross_w: payload.negotiated_gross_w || null,
+      negotiated_gross_volume: grossVol,
       negotiated_l: payload.negotiated_l || null,
       negotiated_h: payload.negotiated_h || null,
       negotiated_w: payload.negotiated_w || null,
+      negotiated_net_volume: netVol,
     })
     .select()
     .single()
@@ -1479,6 +1500,15 @@ export async function updateInspection(id, payload) {
   delete cleanPayload.buyer_company_id
   delete cleanPayload.marker_id
   delete cleanPayload.created_at
+
+  // Recalcula volumes
+  if (cleanPayload.negotiated_gross_l && cleanPayload.negotiated_gross_h && cleanPayload.negotiated_gross_w) {
+    cleanPayload.negotiated_gross_volume = parseFloat(cleanPayload.negotiated_gross_l) * parseFloat(cleanPayload.negotiated_gross_h) * parseFloat(cleanPayload.negotiated_gross_w)
+  }
+  if (cleanPayload.negotiated_l && cleanPayload.negotiated_h && cleanPayload.negotiated_w) {
+    cleanPayload.negotiated_net_volume = parseFloat(cleanPayload.negotiated_l) * parseFloat(cleanPayload.negotiated_h) * parseFloat(cleanPayload.negotiated_w)
+  }
+
   const { error } = await supabase
     .from('block_inspections')
     .update(cleanPayload)
@@ -2010,16 +2040,57 @@ export async function finalizeInspectionPurchase(profile, visitId, payload) {
           if (sbErr) console.warn('Erro ao criar sale_blocks:', sbErr)
         }
 
-        // 6d. Atualiza status dos blocos para 'sold'
-        const blockIds = blockSummary
-          .filter(b => b.type === 'inspection' && b.original_block_id)
-          .map(b => b.original_block_id)
-        if (blockIds.length > 0) {
+        // 6d. Atualiza blocos: sobrescreve com valores negociados e preserva histórico
+        for (const i of (insps || [])) {
+          const orig = originalBlocks.find(b => b.id === i.original_block_id)
+          if (!orig) continue
+
+          // Verifica se já foi sobrescrito antes (não sobrescreve duas vezes o histórico)
+          const alreadyOverridden = orig.overridden_by_buyer_at != null
+
+          const update = { status: 'sold' }
+
+          // Preserva valores originais SE for primeira sobrescrita
+          if (!alreadyOverridden) {
+            update.original_gross_l = orig.gross_l
+            update.original_gross_h = orig.gross_h
+            update.original_gross_w = orig.gross_w
+            update.original_gross_volume = orig.gross_volume
+            update.original_net_l = orig.net_l
+            update.original_net_h = orig.net_h
+            update.original_net_w = orig.net_w
+            update.original_net_volume = orig.net_volume
+            update.original_total_value = orig.total_value
+            update.original_price_m3 = orig.price_m3
+            update.original_currency = orig.currency
+          }
+
+          // Sobrescreve com valores negociados (se houver)
+          if (i.negotiated_gross_l) update.gross_l = i.negotiated_gross_l
+          if (i.negotiated_gross_h) update.gross_h = i.negotiated_gross_h
+          if (i.negotiated_gross_w) update.gross_w = i.negotiated_gross_w
+          if (i.negotiated_gross_volume) update.gross_volume = i.negotiated_gross_volume
+          if (i.negotiated_l) update.net_l = i.negotiated_l
+          if (i.negotiated_h) update.net_h = i.negotiated_h
+          if (i.negotiated_w) update.net_w = i.negotiated_w
+          if (i.negotiated_net_volume) update.net_volume = i.negotiated_net_volume
+          if (i.negotiated_value) {
+            update.total_value = i.negotiated_value
+            update.currency = i.negotiated_currency || orig.currency
+            // Recalcula price_m3 com base no volume líquido
+            const useVolume = i.negotiated_net_volume || orig.net_volume
+            if (useVolume > 0) update.price_m3 = i.negotiated_value / useVolume
+          }
+
+          update.sold_dollar_rate = dollarRate || null
+          update.overridden_by_buyer_at = new Date().toISOString()
+          update.overridden_by_buyer_id = profile.buyer_company_id
+
           const { error: updErr } = await supabase
             .from('blocks')
-            .update({ status: 'sold' })
-            .in('id', blockIds)
-          if (updErr) console.warn('Erro ao atualizar blocos para sold:', updErr)
+            .update(update)
+            .eq('id', orig.id)
+          if (updErr) console.warn('Erro ao atualizar bloco com valores negociados:', updErr)
         }
       }
     }
@@ -2112,3 +2183,134 @@ export async function listPurchases(profile) {
   return data || []
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// ETAPA 7 — Listar Indústrias Stone Block (lado pedreira)
+// ═══════════════════════════════════════════════════════════════
+
+// Pedreira chama isto pra ver indústrias Stone Block disponíveis
+// pra liberar catálogo direto. Retorna indústrias que AINDA não são
+// clientes da pedreira.
+export async function listBuyerCompaniesForQuarry(profile) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+
+  // 1. Pega todas as indústrias
+  const { data: buyers, error: bErr } = await supabase
+    .from('buyer_companies')
+    .select('*')
+    .order('name')
+  if (bErr) throw bErr
+
+  // 2. Pega clients da pedreira que já têm vínculo
+  const { data: existingClients } = await supabase
+    .from('clients')
+    .select('id, name, buyer_company_id')
+    .eq('company_id', companyId)
+    .not('buyer_company_id', 'is', null)
+
+  const linkedBuyerIds = new Set((existingClients || []).map(c => c.buyer_company_id))
+
+  // 3. Marca cada indústria como vinculada ou não
+  return (buyers || []).map(b => ({
+    ...b,
+    is_linked: linkedBuyerIds.has(b.id),
+    linked_client: (existingClients || []).find(c => c.buyer_company_id === b.id) || null,
+  }))
+}
+
+// Cria cliente vinculado a uma indústria (pedreira chama)
+export async function createClientLinkedToBuyer(profile, buyerCompany) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+
+  // Verifica se já existe
+  const { data: existing } = await supabase
+    .from('clients')
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('buyer_company_id', buyerCompany.id)
+    .maybeSingle()
+
+  if (existing) return existing
+
+  const { data: newClient, error } = await supabase
+    .from('clients')
+    .insert({
+      company_id: companyId,
+      buyer_company_id: buyerCompany.id,
+      name: buyerCompany.name,
+      country: 'BR',
+      email: buyerCompany.contact_email || null,
+      phone: buyerCompany.contact_phone || null,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return newClient
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ETAPA 7 — Adicionar bloco do catálogo a uma inspeção (lado indústria)
+// ═══════════════════════════════════════════════════════════════
+
+// Lista inspeções ABERTAS da indústria em uma pedreira específica
+export async function listOpenVisitsForQuarry(profile, quarryCompanyId) {
+  if (!profile?.buyer_company_id) return []
+  // Acha as pedreiras externas dessa indústria que apontam pra essa pedreira Stone Block (se vincularam)
+  // Mas como external_quarry não tem vínculo direto com quarry_company_id, fazemos pelo nome OU criamos vínculo
+  // Por simplicidade: lista todas as visitas abertas da indústria que têm uses_stone_block = true
+  const { data, error } = await supabase
+    .from('inspections')
+    .select('*')
+    .eq('buyer_company_id', profile.buyer_company_id)
+    .eq('status', 'open')
+    .order('visit_date', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+// Cria inspeção rápida (sem pedreira externa específica) e adiciona o bloco
+export async function quickCreateVisitWithBlock(profile, blockOriginal, options = {}) {
+  if (!profile?.buyer_company_id) throw new Error('Sem indústria associada')
+
+  // Cria inspeção marcando uses_stone_block = true
+  const { data: visit, error: visitError } = await supabase
+    .from('inspections')
+    .insert({
+      buyer_company_id: profile.buyer_company_id,
+      marker_id: profile.id,
+      external_quarry_id: options.external_quarry_id || null,
+      uses_stone_block: true,
+      visit_date: new Date().toISOString(),
+      notes: options.notes || 'Adicionado direto do Catálogo da Pedreira',
+      status: 'open',
+    })
+    .select()
+    .single()
+  if (visitError) throw visitError
+
+  // Cria block_inspection vinculado
+  await createInspection(profile, {
+    original_block_id: blockOriginal.id,
+    inspection_id: visit.id,
+    photos: [],
+    notes: null,
+    negotiated_value: blockOriginal.total_value || null,
+    negotiated_currency: blockOriginal.currency || 'USD',
+  })
+
+  return visit
+}
+
+// Adiciona bloco do catálogo a uma inspeção já aberta
+export async function addCatalogBlockToVisit(profile, blockOriginal, visitId) {
+  if (!profile?.buyer_company_id) throw new Error('Sem indústria associada')
+
+  return await createInspection(profile, {
+    original_block_id: blockOriginal.id,
+    inspection_id: visitId,
+    photos: [],
+    notes: null,
+    negotiated_value: blockOriginal.total_value || null,
+    negotiated_currency: blockOriginal.currency || 'USD',
+  })
+}

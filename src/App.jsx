@@ -2825,6 +2825,10 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
   const [filterClient, setFilterClient] = useState('')
   const [filterMaterial, setFilterMaterial] = useState('')
   const [filterQuarry, setFilterQuarry] = useState('')
+  const [showBuyersModal, setShowBuyersModal] = useState(false)
+  const [buyerCompanies, setBuyerCompanies] = useState([])
+  const [loadingBuyers, setLoadingBuyers] = useState(false)
+  const [clientSearch, setClientSearch] = useState('')
 
   const availableBlocks = blocks.filter(b => b.status === 'available' || b.status === 'reserved' || b.status === 'reserve')
 
@@ -2848,6 +2852,32 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
 
   const toggleBlock = (id) => setSelectedBlocks(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   const toggleClient = (id) => setSelectedClients(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+
+  const openBuyersModal = async () => {
+    setShowBuyersModal(true)
+    setLoadingBuyers(true)
+    try {
+      const list = await api.listBuyerCompaniesForQuarry(profile)
+      setBuyerCompanies(list)
+    } catch (e) {
+      toast('Erro ao buscar indústrias: ' + e.message, 'err')
+    } finally { setLoadingBuyers(false) }
+  }
+
+  const linkBuyer = async (buyer) => {
+    try {
+      const newClient = await api.createClientLinkedToBuyer(profile, buyer)
+      toast(`${buyer.name} adicionado como cliente!`, 'ok')
+      await onChange()
+      // Seleciona automaticamente
+      setSelectedClients(prev => prev.includes(newClient.id) ? prev : [...prev, newClient.id])
+      // Atualiza lista
+      const list = await api.listBuyerCompaniesForQuarry(profile)
+      setBuyerCompanies(list)
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    }
+  }
 
   const confirm = async () => {
     setSaving(true)
@@ -3026,25 +3056,90 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
 
               {step === 2 && (
                 <>
-                  <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 14 }}>Selecione os clientes que terão acesso:</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>
+                        Selecione os clientes que terão acesso
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 2 }}>
+                        {selectedClients.length} de {clients.length} selecionado(s)
+                      </div>
+                    </div>
+                    <button className="btn bb bsm" onClick={openBuyersModal} title="Adicionar indústria Stone Block como cliente">
+                      🏭 Buscar Indústrias Cadastradas
+                    </button>
+                  </div>
+
+                  {clients.length > 0 && (
+                    <div style={{ marginBottom: 12 }}>
+                      <input
+                        className="fc"
+                        placeholder="🔍 Buscar cliente por nome ou email..."
+                        value={clientSearch}
+                        onChange={e => setClientSearch(e.target.value)}
+                        style={{ fontSize: 13 }}
+                      />
+                    </div>
+                  )}
+
                   {clients.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: 30, color: 'var(--mist)' }}>Nenhum cliente cadastrado</div>
+                    <div style={{ textAlign: 'center', padding: 30, color: 'var(--mist)', background: 'var(--haze)', borderRadius: 10 }}>
+                      <div style={{ fontSize: 32, marginBottom: 8 }}>👥</div>
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>Nenhum cliente cadastrado</div>
+                      <div style={{ fontSize: 12 }}>Use o botão "Buscar Indústrias" para adicionar.</div>
+                    </div>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 400, overflowY: 'auto' }}>
-                      {clients.map(c => {
-                        const sel = selectedClients.includes(c.id)
-                        return (
-                          <div key={c.id} onClick={() => toggleClient(c.id)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 10, border: '2px solid ' + (sel ? 'var(--sap6)' : 'var(--fog)'), background: sel ? 'var(--sap1)' : '#fff', borderRadius: 8, cursor: 'pointer' }}>
-                            <div style={{ width: 20, height: 20, borderRadius: 4, border: '2px solid', borderColor: sel ? 'var(--sap6)' : 'var(--fog)', background: sel ? 'var(--sap6)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {sel && <Icon n="check" s={12} c="#fff" />}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 400, overflowY: 'auto' }}>
+                      {clients
+                        .filter(c => {
+                          if (!clientSearch) return true
+                          const s = clientSearch.toLowerCase()
+                          return (c.name || '').toLowerCase().includes(s) || (c.email || '').toLowerCase().includes(s)
+                        })
+                        .map(c => {
+                          const sel = selectedClients.includes(c.id)
+                          const isLinkedBuyer = !!c.buyer_company_id
+                          return (
+                            <div
+                              key={c.id}
+                              onClick={() => toggleClient(c.id)}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 12,
+                                padding: 12,
+                                border: '2px solid ' + (sel ? 'var(--sap6)' : 'var(--fog)'),
+                                background: sel ? 'var(--sap1)' : '#fff',
+                                borderRadius: 10,
+                                cursor: 'pointer',
+                                transition: 'all .15s',
+                              }}
+                            >
+                              <div style={{
+                                width: 22, height: 22, borderRadius: 5,
+                                border: '2px solid', borderColor: sel ? 'var(--sap6)' : 'var(--fog)',
+                                background: sel ? 'var(--sap6)' : 'transparent',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                flexShrink: 0,
+                              }}>
+                                {sel && <Icon n="check" s={14} c="#fff" />}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <div style={{ fontWeight: 700, fontSize: 14 }}>{c.name}</div>
+                                  {isLinkedBuyer && (
+                                    <span className="bdg" style={{ background: 'var(--sap1)', color: 'var(--sap7)', fontSize: 10, padding: '2px 6px' }}>
+                                      🏭 Indústria SB
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 2 }}>
+                                  {c.country || '—'}{c.email && ' · ' + c.email}
+                                </div>
+                              </div>
                             </div>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ fontWeight: 600 }}>{c.name}</div>
-                              <div style={{ fontSize: 12, color: 'var(--mist)' }}>{c.country} {c.email && '· ' + c.email}</div>
-                            </div>
-                          </div>
-                        )
-                      })}
+                          )
+                        })}
                     </div>
                   )}
                 </>
@@ -3096,12 +3191,80 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
           </div>
         </div>
       )}
+
+      {/* Modal Buscar Indústrias Cadastradas (Etapa 7) */}
+      {showBuyersModal && (
+        <div className="mo" onClick={() => setShowBuyersModal(false)}>
+          <div className="md" style={{ maxWidth: 600 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div>
+                <div className="mtit">🏭 Indústrias Stone Block</div>
+                <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>
+                  Adicione uma indústria como cliente do seu CRM
+                </div>
+              </div>
+              <button className="btn bo bsm" onClick={() => setShowBuyersModal(false)}>
+                <Icon n="x" s={14} />
+              </button>
+            </div>
+            <div className="mbody">
+              {loadingBuyers ? (
+                <div style={{ padding: 30, textAlign: 'center', color: 'var(--mist)' }}>
+                  <span className="spinner"></span> Buscando indústrias...
+                </div>
+              ) : buyerCompanies.length === 0 ? (
+                <div style={{ padding: 30, textAlign: 'center', color: 'var(--mist)' }}>
+                  Nenhuma indústria cadastrada no Stone Block ainda.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {buyerCompanies.map(b => (
+                    <div key={b.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 12, padding: 12,
+                      border: '1px solid var(--fog)', borderRadius: 10, background: '#fff'
+                    }}>
+                      <div style={{
+                        width: 42, height: 42, borderRadius: 8, background: 'var(--sap1)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 20, flexShrink: 0,
+                      }}>🏭</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>{b.name}</div>
+                        <div style={{ fontSize: 12, color: 'var(--mist)' }}>
+                          {b.contact_email || '—'}
+                        </div>
+                        {b.is_linked && (
+                          <div style={{ fontSize: 11, color: 'var(--ok)', marginTop: 2, fontWeight: 600 }}>
+                            ✓ Já é cliente: {b.linked_client?.name}
+                          </div>
+                        )}
+                      </div>
+                      {b.is_linked ? (
+                        <span className="bdg" style={{ background: '#dcfce7', color: '#15803d', fontSize: 11 }}>
+                          Vinculado
+                        </span>
+                      ) : (
+                        <button className="btn bb bsm" onClick={() => linkBuyer(b)}>
+                          + Adicionar
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ marginTop: 14, fontSize: 12, color: 'var(--mist)', background: 'var(--haze)', padding: 10, borderRadius: 8, lineHeight: 1.5 }}>
+                💡 Ao adicionar uma indústria, ela vira cliente do seu CRM. Os blocos que você liberar para ela vão aparecer no "Catálogo da Pedreira" dela.
+              </div>
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={() => setShowBuyersModal(false)}>Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
-
-// ═══════════════════════════════════════════════════════════════
-// CLIENT CATALOG — visão do cliente, vê blocos liberados para ele
 // ═══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
 // CLIENT PURCHASES PAGE — histórico de compras do cliente
@@ -5391,7 +5554,7 @@ function IndInspectionFormModal({ profile, block, existingInspection, inspection
               <div className="fg">
                 <label className="fl">Fotos de inspeção ({photos.length}/4)</label>
                 {photos.length < 4 && (
-                  <input type="file" accept="image/*" multiple capture="environment" onChange={handlePhotoUpload} disabled={uploading} style={{ fontSize: 13 }} />
+                  <input type="file" accept="image/*" multiple onChange={handlePhotoUpload} disabled={uploading} style={{ fontSize: 13 }} />
                 )}
                 {uploading && <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 4 }}><span className="spinner"></span> Enviando...</div>}
                 {photos.length > 0 && (
@@ -5667,7 +5830,7 @@ function IndExternalBlockFormPage({ profile, buyerData, onChange, toast, prefill
           <div className="fg" style={{ marginTop: 16 }}>
             <label className="fl">Fotos do bloco ({photos.length}/4) *</label>
             {photos.length < 4 && (
-              <input type="file" accept="image/*" multiple capture="environment" onChange={handlePhotoUpload} disabled={uploading} style={{ fontSize: 13 }} />
+              <input type="file" accept="image/*" multiple onChange={handlePhotoUpload} disabled={uploading} style={{ fontSize: 13 }} />
             )}
             {uploading && <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 4 }}><span className="spinner"></span> Enviando...</div>}
             {photos.length > 0 && (
@@ -7665,7 +7828,7 @@ function IndExternalBlockFormModal({ profile, buyerData, visit, onClose, onSaved
           <div className="fg" style={{ marginTop: 12 }}>
             <label className="fl">Fotos ({photos.length}/4) *</label>
             {photos.length < 4 && (
-              <input type="file" accept="image/*" multiple capture="environment" onChange={handlePhotoUpload} disabled={uploading} style={{ fontSize: 13 }} />
+              <input type="file" accept="image/*" multiple onChange={handlePhotoUpload} disabled={uploading} style={{ fontSize: 13 }} />
             )}
             {uploading && <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 4 }}><span className="spinner"></span> Enviando...</div>}
             {photos.length > 0 && (
@@ -7704,12 +7867,16 @@ function IndCatalogPage({ profile, buyerData, onChange, toast }) {
   const externalBlocks = buyerData?.externalBlocks || []
   const visits = buyerData?.visits || []
   const externalQuarries = buyerData?.externalQuarries || []
+  const purchases = buyerData?.purchases || []
   const [search, setSearch] = useState('')
   const [filterMaterial, setFilterMaterial] = useState('')
   const [filterQuarry, setFilterQuarry] = useState('')
   const [filterType, setFilterType] = useState('all') // all | sb | external
   const [originalBlocks, setOriginalBlocks] = useState({})
   const [detail, setDetail] = useState(null) // { type, item }
+
+  // IDs de inspeções (visitas) que JÁ FORAM COMPRADAS — filtrar fora
+  const purchasedInspectionIds = new Set(purchases.map(p => p.inspection_id))
 
   useEffect(() => {
     const ids = [...new Set(inspections.map(i => i.original_block_id))]
@@ -7732,10 +7899,14 @@ function IndCatalogPage({ profile, buyerData, onChange, toast }) {
     })()
   }, [inspections.length])
 
-  // Normaliza pra um formato unificado
+  // Normaliza pra um formato unificado — EXCLUI blocos já comprados
   const items = []
   inspections.forEach(i => {
+    // Se a visita já foi finalizada como compra, NÃO mostrar
+    if (purchasedInspectionIds.has(i.inspection_id)) return
     const orig = originalBlocks[i.original_block_id]
+    // Se o bloco original já está vendido (status sold), também não mostrar
+    if (orig?.status === 'sold') return
     const visit = visits.find(v => v.id === i.inspection_id)
     const quarry = visit ? externalQuarries.find(q => q.id === visit.external_quarry_id) : null
     items.push({
@@ -7757,6 +7928,8 @@ function IndCatalogPage({ profile, buyerData, onChange, toast }) {
     })
   })
   externalBlocks.forEach(b => {
+    if (purchasedInspectionIds.has(b.inspection_id)) return
+    if (b.status === 'bought') return
     const visit = visits.find(v => v.id === b.inspection_id)
     const quarry = externalQuarries.find(q => q.id === b.external_quarry_id)
     items.push({
@@ -7912,17 +8085,52 @@ function IndQuarryCatalogPage({ profile, buyerData, toast }) {
   const [search, setSearch] = useState('')
   const [filterMaterial, setFilterMaterial] = useState('')
   const [detail, setDetail] = useState(null)
+  const [addBlockToVisit, setAddBlockToVisit] = useState(null) // { block, visits }
+  const [adding, setAdding] = useState(false)
 
-  useEffect(() => {
-    ;(async () => {
-      setLoading(true)
-      try {
-        const data = await api.listIndQuarryCatalog(profile)
-        setBlocks(data || [])
-      } catch (e) { toast('Erro ao carregar catálogo: ' + e.message, 'err') }
-      finally { setLoading(false) }
-    })()
-  }, [])
+  const reloadCatalog = async () => {
+    setLoading(true)
+    try {
+      const data = await api.listIndQuarryCatalog(profile)
+      setBlocks(data || [])
+    } catch (e) { toast('Erro ao carregar catálogo: ' + e.message, 'err') }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { reloadCatalog() }, [])
+
+  const openAddToVisit = async (block) => {
+    try {
+      const visits = await api.listOpenVisitsForQuarry(profile, block.company_id)
+      setAddBlockToVisit({ block, visits })
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    }
+  }
+
+  const addToExistingVisit = async (visitId) => {
+    if (!addBlockToVisit) return
+    setAdding(true)
+    try {
+      await api.addCatalogBlockToVisit(profile, addBlockToVisit.block, visitId)
+      toast('✓ Bloco adicionado à inspeção!', 'ok')
+      setAddBlockToVisit(null)
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setAdding(false) }
+  }
+
+  const createNewVisitAndAdd = async () => {
+    if (!addBlockToVisit) return
+    setAdding(true)
+    try {
+      await api.quickCreateVisitWithBlock(profile, addBlockToVisit.block)
+      toast('✓ Inspeção criada e bloco adicionado!', 'ok')
+      setAddBlockToVisit(null)
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setAdding(false) }
+  }
 
   const filtered = blocks.filter(b => {
     if (search && !(b.code || '').toLowerCase().includes(search.toLowerCase()) && !((b.sys_code || '').toLowerCase().includes(search.toLowerCase()))) return false
@@ -7969,27 +8177,34 @@ function IndQuarryCatalogPage({ profile, buyerData, toast }) {
       ) : (
         <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))' }}>
           {filtered.map(b => (
-            <div key={b.id} className="card" style={{ cursor: 'pointer', borderTop: '4px solid var(--sap6)' }} onClick={() => setDetail(b)}>
-              {b.photos[0] ? (
-                <div style={{ position: 'relative' }}>
-                  <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 200, objectFit: 'cover', display: 'block' }} />
-                  {b.photos.length > 1 && (
-                    <div style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,.65)', color: '#fff', padding: '3px 9px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>
-                      📷 {b.photos.length}
-                    </div>
-                  )}
+            <div key={b.id} className="card" style={{ borderTop: '4px solid var(--sap6)' }}>
+              <div style={{ cursor: 'pointer' }} onClick={() => setDetail(b)}>
+                {b.photos[0] ? (
+                  <div style={{ position: 'relative' }}>
+                    <img src={b.photos[0]} alt={b.code} style={{ width: '100%', height: 200, objectFit: 'cover', display: 'block' }} />
+                    {b.photos.length > 1 && (
+                      <div style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,.65)', color: '#fff', padding: '3px 9px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>
+                        📷 {b.photos.length}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ height: 180, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
+                )}
+                <div className="cb" style={{ paddingBottom: 8 }}>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{b.code}</div>
+                  {b.sys_code && <div style={{ fontSize: 11, color: 'var(--mist)', fontFamily: 'monospace', marginBottom: 4 }}>{b.sys_code}</div>}
+                  <div style={{ fontSize: 13, marginBottom: 4 }}>{b.material}</div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 6 }}>Classif. {b.classification} · {(b.net_volume || 0).toFixed(2)} m³</div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--sap7)' }}>
+                    {money(b.total_value, b.currency)}
+                  </div>
                 </div>
-              ) : (
-                <div style={{ height: 180, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
-              )}
-              <div className="cb">
-                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{b.code}</div>
-                {b.sys_code && <div style={{ fontSize: 11, color: 'var(--mist)', fontFamily: 'monospace', marginBottom: 4 }}>{b.sys_code}</div>}
-                <div style={{ fontSize: 13, marginBottom: 4 }}>{b.material}</div>
-                <div style={{ fontSize: 11, color: 'var(--mist)', marginBottom: 6 }}>Classif. {b.classification} · {(b.net_volume || 0).toFixed(2)} m³</div>
-                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--sap7)' }}>
-                  {money(b.total_value, b.currency)}
-                </div>
+              </div>
+              <div style={{ padding: '0 14px 14px' }}>
+                <button className="btn bb bsm" style={{ width: '100%' }} onClick={() => openAddToVisit(b)}>
+                  + Adicionar à Inspeção
+                </button>
               </div>
             </div>
           ))}
@@ -7998,6 +8213,71 @@ function IndQuarryCatalogPage({ profile, buyerData, toast }) {
 
       {detail && (
         <BlockDetailModal block={detail} quarry={null} onClose={() => setDetail(null)} />
+      )}
+
+      {/* Modal: selecionar inspeção pra adicionar bloco */}
+      {addBlockToVisit && (
+        <div className="mo" onClick={() => setAddBlockToVisit(null)}>
+          <div className="md" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div>
+                <div className="mtit">📍 Adicionar à Inspeção</div>
+                <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>
+                  Bloco {addBlockToVisit.block.code} — {addBlockToVisit.block.material}
+                </div>
+              </div>
+              <button className="btn bo bsm" onClick={() => setAddBlockToVisit(null)} disabled={adding}>
+                <Icon n="x" s={14} />
+              </button>
+            </div>
+            <div className="mbody">
+              {addBlockToVisit.visits.length === 0 ? (
+                <>
+                  <div style={{ background: '#fef3c7', padding: 14, borderRadius: 10, marginBottom: 14 }}>
+                    <div style={{ fontWeight: 700, color: '#854d0e', marginBottom: 6 }}>
+                      ⚠️ Você ainda não tem inspeção aberta
+                    </div>
+                    <div style={{ fontSize: 13, color: '#92400e', lineHeight: 1.5 }}>
+                      Não foi encontrada nenhuma inspeção aberta. Deseja criar uma nova inspeção agora e adicionar este bloco a ela?
+                    </div>
+                  </div>
+                  <button className="btn bb" style={{ width: '100%' }} onClick={createNewVisitAndAdd} disabled={adding}>
+                    {adding ? <><span className="spinner"></span> Criando...</> : '🚀 Criar Inspeção e Adicionar'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 10 }}>
+                    Selecione uma inspeção aberta:
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+                    {addBlockToVisit.visits.map(v => (
+                      <button
+                        key={v.id}
+                        className="card"
+                        style={{ textAlign: 'left', cursor: 'pointer', padding: 12, border: '1px solid var(--fog)', background: '#fff' }}
+                        onClick={() => addToExistingVisit(v.id)}
+                        disabled={adding}
+                      >
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>{fmtDate(v.visit_date)}</div>
+                        <div style={{ fontSize: 12, color: 'var(--mist)', marginTop: 2 }}>
+                          {v.notes ? v.notes.slice(0, 60) : 'Sem observações'}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--mist)', marginBottom: 10 }}>— ou —</div>
+                  <button className="btn bo" style={{ width: '100%' }} onClick={createNewVisitAndAdd} disabled={adding}>
+                    {adding ? <><span className="spinner"></span> Criando...</> : '+ Criar Nova Inspeção'}
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={() => setAddBlockToVisit(null)} disabled={adding}>Cancelar</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -8237,6 +8517,7 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
   const [filterMaterial, setFilterMaterial] = useState('')
   const [search, setSearch] = useState('')
   const [originalBlocks, setOriginalBlocks] = useState({})
+  const [detail, setDetail] = useState(null) // bloco selecionado pra ver detalhes
 
   // Só inspeções que pertencem a compras finalizadas
   const finalizedInspectionIds = new Set(purchases.map(p => p.inspection_id))
@@ -8282,12 +8563,16 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
       value: i.negotiated_value || orig?.total_value,
       currency: i.negotiated_currency || orig?.currency,
       photo: (i.photos && i.photos[0]) || (orig?.photos && orig.photos[0]),
+      photos: [...(i.photos || []), ...((orig?.photos) || [])],
       quarry_name: quarry?.name || '—',
       quarry_id: visit?.external_quarry_id,
       marker_id: visit?.marker_id,
       marker_name: marker?.name || '—',
       date: purchase?.created_at,
       purchase,
+      visit,
+      original: orig,
+      inspection: i,
     })
   })
   externalBlocks.filter(b => finalizedInspectionIds.has(b.inspection_id)).forEach(b => {
@@ -8305,12 +8590,15 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
       value: b.total_value,
       currency: b.currency,
       photo: b.photos && b.photos[0],
+      photos: b.photos || [],
       quarry_name: quarry?.name || '—',
       quarry_id: b.external_quarry_id,
       marker_id: visit?.marker_id,
       marker_name: marker?.name || '—',
       date: purchase?.created_at,
       purchase,
+      visit,
+      block: b,
     })
   })
 
@@ -8428,7 +8716,7 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
       ) : (
         <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))' }}>
           {filtered.map(it => (
-            <div key={it.type + ':' + it.id} className="card" style={{ borderTop: `4px solid ${it.type === 'inspection' ? 'var(--sap6)' : '#d97706'}` }}>
+            <div key={it.type + ':' + it.id} className="card" style={{ borderTop: `4px solid ${it.type === 'inspection' ? 'var(--sap6)' : '#d97706'}`, cursor: 'pointer' }} onClick={() => setDetail(it)}>
               {it.photo ? (
                 <div style={{ position: 'relative' }}>
                   <img src={it.photo} alt={it.code} style={{ width: '100%', height: 180, objectFit: 'cover', display: 'block' }} />
@@ -8453,6 +8741,149 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
           ))}
         </div>
       )}
+
+      {detail && (
+        <BoughtBlockDetailModal item={detail} onClose={() => setDetail(null)} />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BOUGHT BLOCK DETAIL — modal com detalhes completos
+// ═══════════════════════════════════════════════════════════════
+function BoughtBlockDetailModal({ item, onClose }) {
+  const { type, code, material, classification, volume, value, currency, photos, quarry_name, marker_name, date, purchase, original, inspection, block } = item
+
+  // Para inspeções: dados negociados + originais; para externos: só os do bloco
+  const isStoneBlock = type === 'inspection'
+
+  // Medidas brutas e líquidas
+  const grossL = isStoneBlock ? (inspection?.negotiated_gross_l || original?.gross_l) : block?.gross_l
+  const grossH = isStoneBlock ? (inspection?.negotiated_gross_h || original?.gross_h) : block?.gross_h
+  const grossW = isStoneBlock ? (inspection?.negotiated_gross_w || original?.gross_w) : block?.gross_w
+  const grossVol = isStoneBlock ? (inspection?.negotiated_gross_volume || original?.gross_volume) : block?.gross_volume
+
+  const netL = isStoneBlock ? (inspection?.negotiated_l || original?.net_l) : block?.net_l
+  const netH = isStoneBlock ? (inspection?.negotiated_h || original?.net_h) : block?.net_h
+  const netW = isStoneBlock ? (inspection?.negotiated_w || original?.net_w) : block?.net_w
+  const netVol = isStoneBlock ? (inspection?.negotiated_net_volume || original?.net_volume) : block?.net_volume
+
+  const priceM3 = netVol > 0 && value ? (value / netVol) : null
+  const notes = isStoneBlock ? inspection?.notes : block?.notes
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 760 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div>
+            <div className="mtit">🧱 {code} <span className="bdg" style={{ background: '#dcfce7', color: '#15803d', fontSize: 11, marginLeft: 8 }}>✓ COMPRADO</span></div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>{material} · {quarry_name}</div>
+          </div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          {photos && photos.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <PhotoGallery photos={photos} height={300} />
+            </div>
+          )}
+
+          {/* Info da compra */}
+          <div style={{ background: 'var(--haze)', padding: 14, borderRadius: 10, marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>💳 Dados da compra</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 10, fontSize: 13 }}>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase' }}>Data</div>
+                <div style={{ fontWeight: 700 }}>{fmtDate(date)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase' }}>Marcador</div>
+                <div style={{ fontWeight: 700 }}>{marker_name}</div>
+              </div>
+              {purchase?.payment_method_name && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase' }}>Pagamento</div>
+                  <div style={{ fontWeight: 700 }}>{purchase.payment_method_name}</div>
+                </div>
+              )}
+              {purchase?.dollar_rate && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase' }}>Dólar</div>
+                  <div style={{ fontWeight: 700 }}>R$ {Number(purchase.dollar_rate).toFixed(4)}</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Dados básicos */}
+          <div style={{ marginBottom: 14, fontSize: 13, lineHeight: 1.7 }}>
+            <div><strong>Material:</strong> {material}</div>
+            <div><strong>Classificação:</strong> {classification || '—'}</div>
+            {isStoneBlock && original?.sys_code && <div><strong>Código do sistema:</strong> {original.sys_code}</div>}
+          </div>
+
+          {/* Medidas brutas */}
+          <div style={{ background: '#f3f4f6', padding: 12, borderRadius: 8, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>📐 Medidas brutas</div>
+            {grossL ? (
+              <>
+                <div style={{ fontSize: 13 }}>comp: {grossL} m · alt: {grossH} m · larg: {grossW} m</div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>Volume: {(grossVol || 0).toFixed(2)} m³</div>
+              </>
+            ) : <div style={{ fontSize: 12, color: 'var(--mist)' }}>—</div>}
+          </div>
+
+          {/* Medidas líquidas */}
+          <div style={{ background: '#dcfce7', padding: 12, borderRadius: 8, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>📐 Medidas líquidas</div>
+            {netL ? (
+              <>
+                <div style={{ fontSize: 13 }}>comp: {netL} m · alt: {netH} m · larg: {netW} m</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#15803d', marginTop: 2 }}>Volume: {(netVol || 0).toFixed(2)} m³</div>
+              </>
+            ) : <div style={{ fontSize: 12, color: 'var(--mist)' }}>—</div>}
+          </div>
+
+          {/* Valores */}
+          <div style={{ background: 'var(--sap1)', padding: 12, borderRadius: 8, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--sap7)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>💰 Valores</div>
+            {priceM3 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 4 }}>
+                <span>Preço por m³:</span>
+                <strong>{money(priceM3, currency)}</strong>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 16 }}>
+              <span><strong>Total:</strong></span>
+              <strong style={{ color: 'var(--sap7)' }}>{value ? money(value, currency) : '—'}</strong>
+            </div>
+          </div>
+
+          {/* Histórico (se houve sobrescrita) */}
+          {isStoneBlock && original?.original_total_value && (
+            <div style={{ background: '#fef3c7', padding: 12, borderRadius: 8, marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#854d0e', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>📜 Valores originais da pedreira (antes da negociação)</div>
+              {original.original_net_l && (
+                <div style={{ fontSize: 12 }}>Líquidas originais: {original.original_net_l} × {original.original_net_h} × {original.original_net_w} m ({(original.original_net_volume || 0).toFixed(2)} m³)</div>
+              )}
+              {original.original_total_value && (
+                <div style={{ fontSize: 12 }}>Valor original: {money(original.original_total_value, original.original_currency)}</div>
+              )}
+            </div>
+          )}
+
+          {notes && (
+            <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Observações</div>
+              <div style={{ fontSize: 13 }}>{notes}</div>
+            </div>
+          )}
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose}>Fechar</button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -8599,9 +9030,12 @@ function PurchaseDetailModal({ item, buyerData, onClose }) {
   const { purchase, visit, quarry, marker } = item
   const inspections = buyerData?.inspections || []
   const externalBlocks = buyerData?.externalBlocks || []
+  const team = buyerData?.team || []
+  const externalQuarries = buyerData?.externalQuarries || []
   const inspectionsHere = inspections.filter(i => i.inspection_id === purchase.inspection_id)
   const externalsHere = externalBlocks.filter(b => b.inspection_id === purchase.inspection_id)
   const [originalBlocks, setOriginalBlocks] = useState({})
+  const [blockDetail, setBlockDetail] = useState(null) // detalhe de bloco específico
 
   useEffect(() => {
     const ids = [...new Set(inspectionsHere.map(i => i.original_block_id))]
@@ -8610,11 +9044,57 @@ function PurchaseDetailModal({ item, buyerData, onClose }) {
       const map = {}
       for (const id of ids) {
         const { data } = await supabase.from('blocks').select('*').eq('id', id).maybeSingle()
-        if (data) map[id] = data
+        if (data) {
+          map[id] = {
+            ...data,
+            photos: Array.isArray(data.photos) ? data.photos
+              : (typeof data.photos === 'string' ? (data.photos.startsWith('[') ? JSON.parse(data.photos) : [data.photos]) : []),
+          }
+        }
       }
       setOriginalBlocks(map)
     })()
   }, [purchase.id])
+
+  const openBlockDetail = (type, i, b) => {
+    if (type === 'inspection') {
+      const orig = originalBlocks[i.original_block_id]
+      setBlockDetail({
+        type: 'inspection',
+        code: orig?.code || '?',
+        material: orig?.material,
+        classification: orig?.classification,
+        photo: (i.photos && i.photos[0]) || (orig?.photos && orig.photos[0]),
+        photos: [...(i.photos || []), ...((orig?.photos) || [])],
+        volume: orig?.net_volume || 0,
+        value: i.negotiated_value || orig?.total_value,
+        currency: i.negotiated_currency || orig?.currency,
+        quarry_name: quarry?.name || '—',
+        marker_name: marker?.name || '—',
+        date: purchase.created_at,
+        purchase,
+        original: orig,
+        inspection: i,
+      })
+    } else {
+      setBlockDetail({
+        type: 'external',
+        code: b.code,
+        material: b.material,
+        classification: b.classification,
+        photo: b.photos && b.photos[0],
+        photos: b.photos || [],
+        volume: b.net_volume || 0,
+        value: b.total_value,
+        currency: b.currency,
+        quarry_name: quarry?.name || '—',
+        marker_name: marker?.name || '—',
+        date: purchase.created_at,
+        purchase,
+        block: b,
+      })
+    }
+  }
 
   return (
     <div className="mo" onClick={onClose}>
@@ -8662,7 +9142,7 @@ function PurchaseDetailModal({ item, buyerData, onClose }) {
           </div>
 
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-            🏗️ {inspectionsHere.length + externalsHere.length} bloco(s) comprado(s)
+            🏗️ {inspectionsHere.length + externalsHere.length} bloco(s) comprado(s) — clique para ver detalhes completos
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -8670,7 +9150,7 @@ function PurchaseDetailModal({ item, buyerData, onClose }) {
               const orig = originalBlocks[i.original_block_id]
               const photo = (i.photos && i.photos[0]) || (orig?.photos && (Array.isArray(orig.photos) ? orig.photos[0] : null))
               return (
-                <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, background: 'var(--haze)', borderRadius: 8 }}>
+                <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, background: 'var(--haze)', borderRadius: 8, cursor: 'pointer' }} onClick={() => openBlockDetail('inspection', i, null)}>
                   {photo && <img src={photo} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 6 }} />}
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700 }}>{orig?.code || '?'} <span className="bdg" style={{ background: 'var(--sap1)', color: 'var(--sap7)', fontSize: 10, marginLeft: 4 }}>Stone Block</span></div>
@@ -8683,7 +9163,7 @@ function PurchaseDetailModal({ item, buyerData, onClose }) {
               )
             })}
             {externalsHere.map(b => (
-              <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, background: '#fef3c7', borderRadius: 8 }}>
+              <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, background: '#fef3c7', borderRadius: 8, cursor: 'pointer' }} onClick={() => openBlockDetail('external', null, b)}>
                 {b.photos && b.photos[0] && <img src={b.photos[0]} alt="" style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 6 }} />}
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700 }}>{b.code} <span className="bdg" style={{ background: '#fef3c7', color: '#d97706', fontSize: 10, marginLeft: 4 }}>Externo</span></div>
@@ -8698,6 +9178,10 @@ function PurchaseDetailModal({ item, buyerData, onClose }) {
           <button className="btn bo" onClick={onClose}>Fechar</button>
         </div>
       </div>
+
+      {blockDetail && (
+        <BoughtBlockDetailModal item={blockDetail} onClose={() => setBlockDetail(null)} />
+      )}
     </div>
   )
 }
