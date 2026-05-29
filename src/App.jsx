@@ -7237,20 +7237,79 @@ function IndVisitsListPage({ profile, buyerData, onChange, toast, setPage, setSe
   const externalQuarries = buyerData?.externalQuarries || []
   const blockInspections = buyerData?.inspections || []
   const externalBlocks = buyerData?.externalBlocks || []
+  const purchaseOrders = buyerData?.purchaseOrders || []
   const [filterStatus, setFilterStatus] = useState('all') // all | open | closed
   const [filterMarker, setFilterMarker] = useState('')
   const [filterQuarry, setFilterQuarry] = useState('')
+  const [filterPeriod, setFilterPeriod] = useState('month') // all | month | last_month | year | custom
+  const [dtInicio, setDtInicio] = useState('')
+  const [dtFim, setDtFim] = useState('')
 
   const countBlocks = (visitId) => {
     return blockInspections.filter(i => i.inspection_id === visitId).length +
            externalBlocks.filter(b => b.inspection_id === visitId).length
   }
 
+  // Soma o valor total da inspeção separado por moeda
+  const sumVisit = (visitId) => {
+    let totalBRL = 0, totalUSD = 0
+    blockInspections.filter(i => i.inspection_id === visitId).forEach(i => {
+      // prioriza preço por m³ * volume líquido
+      const nVol = Number(i.negotiated_net_volume) || 0
+      let val = 0
+      if (i.negotiated_price_m3 && nVol > 0) {
+        val = Number(i.negotiated_price_m3) * nVol
+      } else if (i.negotiated_value) {
+        val = Number(i.negotiated_value)
+      }
+      const cur = i.negotiated_currency || 'USD'
+      if (cur === 'USD') totalUSD += val
+      else totalBRL += val
+    })
+    externalBlocks.filter(b => b.inspection_id === visitId).forEach(b => {
+      const val = Number(b.total_value) || 0
+      const cur = b.currency || 'USD'
+      if (cur === 'USD') totalUSD += val
+      else totalBRL += val
+    })
+    return { totalBRL, totalUSD }
+  }
+
+  // Última ordem de compra da inspeção (se existir)
+  const getOrder = (visitId) => purchaseOrders.find(o => o.inspection_id === visitId)
+
+  const matchesPeriod = (date) => {
+    if (filterPeriod === 'all' || !date) return true
+    const d = new Date(date)
+    const now = new Date()
+    if (filterPeriod === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+    if (filterPeriod === 'last_month') {
+      const last = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      return d.getMonth() === last.getMonth() && d.getFullYear() === last.getFullYear()
+    }
+    if (filterPeriod === 'year') return d.getFullYear() === now.getFullYear()
+    if (filterPeriod === 'custom') {
+      if (dtInicio && d < new Date(dtInicio + 'T00:00:00')) return false
+      if (dtFim && d > new Date(dtFim + 'T23:59:59')) return false
+      return true
+    }
+    return true
+  }
+
   const filtered = visits.filter(v => {
     if (filterStatus !== 'all' && v.status !== filterStatus) return false
     if (filterMarker && v.marker_id !== filterMarker) return false
     if (filterQuarry && v.external_quarry_id !== filterQuarry) return false
+    if (!matchesPeriod(v.visit_date)) return false
     return true
+  })
+
+  // Totais consolidados (para mostrar topo)
+  let bigTotalBRL = 0, bigTotalUSD = 0
+  filtered.forEach(v => {
+    const s = sumVisit(v.id)
+    bigTotalBRL += s.totalBRL
+    bigTotalUSD += s.totalUSD
   })
 
   const open = (v) => {
@@ -7260,13 +7319,15 @@ function IndVisitsListPage({ profile, buyerData, onChange, toast, setPage, setSe
     }
   }
 
+  const hasFilter = filterStatus !== 'all' || filterMarker || filterQuarry || filterPeriod !== 'month' || dtInicio || dtFim
+
   return (
     <div>
       <div className="ph">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div>
             <div className="ptit">📋 Inspeções</div>
-            <div className="psub">{filtered.length} inspeção(ões) {filtered.length !== visits.length ? `de ${visits.length}` : ''}</div>
+            <div className="psub">{filtered.length} inspeção(ões) {hasFilter ? `de ${visits.length}` : ''}</div>
           </div>
           <button className="btn bb" onClick={() => setPage && setPage('ind_new_visit')}>
             <Icon n="plus" s={16} c="#fff" /> Cadastrar Inspeção
@@ -7274,7 +7335,43 @@ function IndVisitsListPage({ profile, buyerData, onChange, toast, setPage, setSe
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+      {/* Totalizadores */}
+      {(bigTotalUSD > 0 || bigTotalBRL > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12, marginBottom: 16 }}>
+          {bigTotalUSD > 0 && (
+            <div className="card" style={{ background: 'linear-gradient(135deg,#10b981,#059669)', border: 'none' }}>
+              <div className="cb">
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Total inspecionado US$</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 22, color: '#fff' }}>{money(bigTotalUSD, 'USD')}</div>
+              </div>
+            </div>
+          )}
+          {bigTotalBRL > 0 && (
+            <div className="card" style={{ background: 'linear-gradient(135deg,#0c1a2e,#1e3a8a)', border: 'none' }}>
+              <div className="cb">
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.8)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Total inspecionado R$</div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 22, color: '#fff' }}>{money(bigTotalBRL, 'BRL')}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Filtros */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 170 }} value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
+          <option value="all">Todos os períodos</option>
+          <option value="month">Mês atual</option>
+          <option value="last_month">Mês anterior</option>
+          <option value="year">Ano atual</option>
+          <option value="custom">Personalizado</option>
+        </select>
+        {filterPeriod === 'custom' && (
+          <>
+            <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtInicio} onChange={e => setDtInicio(e.target.value)} />
+            <input type="date" className="fc" style={{ fontSize: 13, padding: '7px 10px' }} value={dtFim} onChange={e => setDtFim(e.target.value)} />
+          </>
+        )}
         <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 160 }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
           <option value="all">Todos status</option>
           <option value="open">🟢 Em aberto</option>
@@ -7288,8 +7385,8 @@ function IndVisitsListPage({ profile, buyerData, onChange, toast, setPage, setSe
           <option value="">Todas as pedreiras</option>
           {externalQuarries.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
         </select>
-        {(filterStatus !== 'all' || filterMarker || filterQuarry) && (
-          <button className="btn bo bsm" onClick={() => { setFilterStatus('all'); setFilterMarker(''); setFilterQuarry('') }}>
+        {hasFilter && (
+          <button className="btn bo bsm" onClick={() => { setFilterStatus('all'); setFilterMarker(''); setFilterQuarry(''); setFilterPeriod('month'); setDtInicio(''); setDtFim('') }}>
             <Icon n="x" s={13} /> Limpar
           </button>
         )}
@@ -7306,33 +7403,70 @@ function IndVisitsListPage({ profile, buyerData, onChange, toast, setPage, setSe
           )}
         </div>
       ) : (
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))' }}>
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))' }}>
           {filtered.map(v => {
             const marker = team.find(m => m.id === v.marker_id)
             const quarry = externalQuarries.find(q => q.id === v.external_quarry_id)
             const blocks = countBlocks(v.id)
+            const { totalBRL, totalUSD } = sumVisit(v.id)
+            const order = getOrder(v.id)
+
+            // Cor da borda baseada no status do pedido (se houver) ou da inspeção
+            let borderColor = 'var(--ok)'
+            if (v.status === 'closed' && !order) borderColor = 'var(--mist)'
+            if (order?.status === 'pending') borderColor = '#f59e0b'
+            if (order?.status === 'approved' || v.order_status === 'approved') borderColor = '#10b981'
+            if (order?.status === 'rejected') borderColor = '#ef4444'
+
             return (
-              <div key={v.id} className="card" style={{ cursor: 'pointer', borderTop: '4px solid ' + (v.status === 'open' ? 'var(--ok)' : 'var(--mist)') }} onClick={() => open(v)}>
+              <div key={v.id} className="card" style={{ cursor: 'pointer', borderTop: `4px solid ${borderColor}` }} onClick={() => open(v)}>
                 <div className="cb">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15 }}>
                       📍 {quarry?.name || '—'}
                     </div>
-                    <span className="bdg" style={{ background: v.status === 'open' ? '#dcfce7' : 'var(--haze)', color: v.status === 'open' ? '#15803d' : 'var(--mist)', fontSize: 11 }}>
-                      {v.status === 'open' ? '🟢 Aberta' : '✓ Encerrada'}
-                    </span>
+                    {/* Badge status */}
+                    {v.order_status === 'awaiting' || order?.status === 'pending' ? (
+                      <span className="bdg" style={{ background: '#fef3c7', color: '#854d0e', fontSize: 11 }}>⏳ Aguardando</span>
+                    ) : v.order_status === 'approved' || order?.status === 'approved' ? (
+                      <span className="bdg" style={{ background: '#dcfce7', color: '#15803d', fontSize: 11 }}>✅ Aprovado</span>
+                    ) : v.order_status === 'rejected' || order?.status === 'rejected' ? (
+                      <span className="bdg" style={{ background: '#fee2e2', color: '#991b1b', fontSize: 11 }}>❌ Rejeitado</span>
+                    ) : (
+                      <span className="bdg" style={{ background: v.status === 'open' ? '#dcfce7' : 'var(--haze)', color: v.status === 'open' ? '#15803d' : 'var(--mist)', fontSize: 11 }}>
+                        {v.status === 'open' ? '🟢 Aberta' : '✓ Encerrada'}
+                      </span>
+                    )}
                   </div>
-                  <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 6 }}>
+                  <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 4 }}>
                     📅 {fmtDate(v.visit_date)}
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--mist)', marginBottom: 6 }}>
                     👤 {marker?.name || '—'}
                   </div>
-                  <div style={{ fontSize: 13, marginBottom: 6 }}>
+                  <div style={{ fontSize: 13, marginBottom: 8 }}>
                     🏗️ <strong>{blocks}</strong> bloco(s) inspecionado(s)
                   </div>
+
+                  {/* Valor total da inspeção */}
+                  {(totalUSD > 0 || totalBRL > 0) && (
+                    <div style={{ background: 'var(--haze)', padding: 8, borderRadius: 6, marginTop: 4 }}>
+                      <div style={{ fontSize: 10, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5, fontWeight: 700, marginBottom: 2 }}>Total da inspeção</div>
+                      {totalUSD > 0 && (
+                        <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14, color: 'var(--sap7)' }}>
+                          {money(totalUSD, 'USD')}
+                        </div>
+                      )}
+                      {totalBRL > 0 && (
+                        <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 14, color: 'var(--sap7)' }}>
+                          {money(totalBRL, 'BRL')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {v.uses_stone_block && (
-                    <div style={{ display: 'inline-block', fontSize: 10, fontWeight: 700, background: 'var(--sap1)', color: 'var(--sap7)', padding: '2px 6px', borderRadius: 4, marginTop: 4 }}>
+                    <div style={{ display: 'inline-block', fontSize: 10, fontWeight: 700, background: 'var(--sap1)', color: 'var(--sap7)', padding: '2px 6px', borderRadius: 4, marginTop: 8 }}>
                       Stone Block
                     </div>
                   )}
@@ -8675,6 +8809,128 @@ function IndOrdersPage({ profile, buyerData, onChange, toast }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// PURCHASE ORDER ITEM CARD — card detalhado de um bloco no pedido
+// ═══════════════════════════════════════════════════════════════
+function PurchaseOrderItemCard({ item }) {
+  const [block, setBlock] = useState(null)
+  const [insp, setInsp] = useState(null)
+  const [expanded, setExpanded] = useState(false)
+
+  useEffect(() => {
+    ;(async () => {
+      try {
+        if (item.block_id) {
+          const { data } = await supabase.from('blocks').select('*').eq('id', item.block_id).maybeSingle()
+          if (data) setBlock({
+            ...data,
+            photos: Array.isArray(data.photos) ? data.photos
+              : (typeof data.photos === 'string' ? (data.photos.startsWith('[') ? JSON.parse(data.photos) : [data.photos]) : []),
+          })
+        }
+        if (item.block_inspection_id) {
+          const { data } = await supabase.from('block_inspections').select('*').eq('id', item.block_inspection_id).maybeSingle()
+          if (data) setInsp({
+            ...data,
+            photos: Array.isArray(data.photos) ? data.photos : (data.photos ? JSON.parse(data.photos) : []),
+          })
+        }
+      } catch (e) {}
+    })()
+  }, [item.id])
+
+  const officialPhotos = block?.photos || []
+  const inspectionPhotos = insp?.photos || []
+  const firstPhoto = inspectionPhotos[0] || officialPhotos[0]
+
+  return (
+    <div style={{ background: 'var(--haze)', borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', gap: 10, padding: 10, cursor: 'pointer', alignItems: 'center' }} onClick={() => setExpanded(!expanded)}>
+        {firstPhoto ? (
+          <img src={firstPhoto} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+        ) : (
+          <div style={{ width: 60, height: 60, background: '#fff', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Icon n="cube" s={24} c="var(--mist)" /></div>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700 }}>{item.code || block?.code || '?'}</div>
+          <div style={{ fontSize: 12, color: 'var(--mist)' }}>{item.material || block?.material}</div>
+          {item.net_volume > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--mist)' }}>
+              {Number(item.net_volume).toFixed(2)} m³{item.price_m3 ? ` · ${money(item.price_m3, item.currency)}/m³` : ''}
+            </div>
+          )}
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontWeight: 700, color: 'var(--sap7)', fontFamily: 'Sora,sans-serif', fontSize: 16 }}>{money(item.total_value, item.currency)}</div>
+          <div style={{ fontSize: 10, color: 'var(--mist)', marginTop: 2 }}>{expanded ? '▲ recolher' : '▼ ver detalhes'}</div>
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ padding: 12, borderTop: '1px solid var(--fog)', background: '#fff' }}>
+          {/* Medidas */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+            {(item.gross_l || item.gross_volume) && (
+              <div style={{ background: '#f3f4f6', padding: 8, borderRadius: 6 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 4 }}>Medidas brutas</div>
+                {item.gross_l && <div style={{ fontSize: 12 }}>{Number(item.gross_l).toFixed(2)} × {Number(item.gross_h).toFixed(2)} × {Number(item.gross_w).toFixed(2)} m</div>}
+                {item.gross_volume && <div style={{ fontSize: 12, fontWeight: 700 }}>Vol: {Number(item.gross_volume).toFixed(2)} m³</div>}
+              </div>
+            )}
+            {(item.net_l || item.net_volume) && (
+              <div style={{ background: '#dcfce7', padding: 8, borderRadius: 6 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 4 }}>Medidas líquidas</div>
+                {item.net_l && <div style={{ fontSize: 12 }}>{Number(item.net_l).toFixed(2)} × {Number(item.net_h).toFixed(2)} × {Number(item.net_w).toFixed(2)} m</div>}
+                {item.net_volume && <div style={{ fontSize: 12, fontWeight: 700, color: '#15803d' }}>Vol: {Number(item.net_volume).toFixed(2)} m³</div>}
+              </div>
+            )}
+          </div>
+
+          {/* Valores */}
+          <div style={{ background: 'var(--sap1)', padding: 10, borderRadius: 6, marginBottom: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--sap7)', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 4 }}>Valores</div>
+            {item.price_m3 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span>Preço por m³:</span>
+                <strong>{money(item.price_m3, item.currency)}</strong>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 700, marginTop: 4 }}>
+              <span>Total:</span>
+              <strong style={{ color: 'var(--sap7)' }}>{money(item.total_value, item.currency)}</strong>
+            </div>
+          </div>
+
+          {/* Observações da inspeção */}
+          {insp?.notes && (
+            <div style={{ fontSize: 12, padding: 8, background: '#fffbeb', borderRadius: 6, marginBottom: 10 }}>
+              <strong>Observações do marcador:</strong> {insp.notes}
+            </div>
+          )}
+
+          {/* Fotos */}
+          {(inspectionPhotos.length > 0 || officialPhotos.length > 0) && (
+            <div>
+              {inspectionPhotos.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 6 }}>📷 Fotos da inspeção</div>
+                  <PhotoGallery photos={inspectionPhotos} height={150} />
+                </div>
+              )}
+              {officialPhotos.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 6 }}>📷 Fotos da pedreira</div>
+                  <PhotoGallery photos={officialPhotos} height={150} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
 // PURCHASE ORDER DETAIL MODAL — usado pelos dois lados
 // ═══════════════════════════════════════════════════════════════
 function PurchaseOrderDetailModal({ item, onClose, isQuarrySide, profile, toast, onAction }) {
@@ -8798,16 +9054,9 @@ function PurchaseOrderDetailModal({ item, onClose, isQuarrySide, profile, toast,
           {loading ? (
             <div style={{ padding: 20, textAlign: 'center', color: 'var(--mist)' }}><span className="spinner"></span> Carregando blocos...</div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {items.map(it => (
-                <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, background: 'var(--haze)', borderRadius: 8 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700 }}>{it.code || '?'}</div>
-                    <div style={{ fontSize: 12, color: 'var(--mist)' }}>{it.material}</div>
-                    {it.net_volume && <div style={{ fontSize: 11, color: 'var(--mist)' }}>{Number(it.net_volume).toFixed(2)} m³{it.price_m3 ? ` · ${money(it.price_m3, it.currency)}/m³` : ''}</div>}
-                  </div>
-                  <div style={{ fontWeight: 700, color: 'var(--sap7)' }}>{money(it.total_value, it.currency)}</div>
-                </div>
+                <PurchaseOrderItemCard key={it.id} item={it} />
               ))}
             </div>
           )}
@@ -8874,7 +9123,14 @@ function QuarryPurchaseOrdersPage({ profile, onChange, toast }) {
     } finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    // Polling de 15s pra ver novos pedidos automaticamente
+    const interval = setInterval(() => {
+      load().catch(() => {})
+    }, 15000)
+    return () => clearInterval(interval)
+  }, [])
 
   const filtered = orders.filter(o => filterStatus === 'all' || o.status === filterStatus)
 

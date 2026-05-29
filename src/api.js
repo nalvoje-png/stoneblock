@@ -2585,6 +2585,8 @@ export async function rejectPurchaseOrder(profile, orderId, reason) {
 
 // Pedreira aprova pedido → cria venda + purchase + baixa blocos
 export async function approvePurchaseOrder(profile, orderId) {
+  console.log('[approvePurchaseOrder] iniciando', orderId)
+  
   const { data: order, error: e1 } = await supabase
     .from('purchase_orders').select('*').eq('id', orderId).single()
   if (e1) throw e1
@@ -2593,157 +2595,211 @@ export async function approvePurchaseOrder(profile, orderId) {
   const { data: items } = await supabase
     .from('purchase_order_items').select('*').eq('purchase_order_id', orderId)
 
-  // Carrega buyer_company para nome do cliente
   const { data: buyerCompany } = await supabase
     .from('buyer_companies').select('*').eq('id', order.buyer_company_id).single()
 
-  // 1. Cria/encontra cliente automático na pedreira
+  // ════════════════════════════════════════════════════════════
+  // PASSO 1: ATUALIZA O STATUS DO PEDIDO PRIMEIRO
+  // Assim, mesmo que outro passo falhe, o pedido fica aprovado
+  // e poderemos investigar
+  // ════════════════════════════════════════════════════════════
+  const { error: statusErr } = await supabase
+    .from('purchase_orders').update({
+      status: 'approved',
+      approved_at: new Date().toISOString(),
+      approved_by: profile.id,
+    }).eq('id', orderId)
+  if (statusErr) {
+    console.error('[approve] erro ao atualizar status:', statusErr)
+    throw new Error('Falha ao aprovar: ' + statusErr.message)
+  }
+  console.log('[approve] ✓ Status atualizado para approved')
+
+  // PASSO 2: Atualiza inspeção
+  const { error: inspErr } = await supabase
+    .from('inspections').update({
+      order_status: 'approved',
+      finalized_at: new Date().toISOString(),
+      finalized_by: profile.id,
+    }).eq('id', order.inspection_id)
+  if (inspErr) console.warn('[approve] aviso inspeção:', inspErr)
+
+  // PASSO 3: Cliente automático na pedreira
   let clientId = null
-  const { data: existingClient } = await supabase
-    .from('clients').select('*')
-    .eq('company_id', order.quarry_company_id)
-    .ilike('name', buyerCompany?.name || '')
-    .maybeSingle()
-  if (existingClient) {
-    clientId = existingClient.id
-    // Garante vínculo
-    if (!existingClient.buyer_company_id) {
-      await supabase.from('clients').update({
-        buyer_company_id: order.buyer_company_id,
-      }).eq('id', existingClient.id)
+  try {
+    const { data: existingClient } = await supabase
+      .from('clients').select('*')
+      .eq('company_id', order.quarry_company_id)
+      .ilike('name', buyerCompany?.name || '')
+      .maybeSingle()
+    if (existingClient) {
+      clientId = existingClient.id
+      if (!existingClient.buyer_company_id) {
+        await supabase.from('clients').update({
+          buyer_company_id: order.buyer_company_id,
+        }).eq('id', existingClient.id)
+      }
+    } else {
+      const { data: newClient, error: cErr } = await supabase
+        .from('clients').insert({
+          company_id: order.quarry_company_id,
+          name: buyerCompany?.name || 'Indústria',
+          country: 'BR',
+          email: buyerCompany?.contact_email || null,
+          phone: buyerCompany?.contact_phone || null,
+          buyer_company_id: order.buyer_company_id,
+        }).select().single()
+      if (cErr) {
+        console.warn('[approve] erro ao criar cliente:', cErr)
+      } else {
+        clientId = newClient.id
+      }
     }
-  } else {
-    const { data: newClient, error: cErr } = await supabase
-      .from('clients').insert({
-        company_id: order.quarry_company_id,
-        name: buyerCompany?.name || 'Indústria',
-        country: 'BR',
-        email: buyerCompany?.contact_email || null,
-        phone: buyerCompany?.contact_phone || null,
-        buyer_company_id: order.buyer_company_id,
-      }).select().single()
-    if (!cErr) clientId = newClient.id
+    console.log('[approve] ✓ Cliente:', clientId)
+  } catch (err) {
+    console.warn('[approve] exception cliente:', err)
   }
 
-  // 2. Cria venda no lado da pedreira
+  // PASSO 4: Venda no lado da pedreira
   let saleId = null
   if (clientId) {
-    const { data: sale, error: sErr } = await supabase
-      .from('sales').insert({
-        company_id: order.quarry_company_id,
-        client_id: clientId,
-        seller_id: null, // venda direta marketplace
-        payment_method_id: order.payment_method_id || null,
-        total_brl: order.total_brl || 0,
-        total_usd: order.total_usd || 0,
-        dollar_rate: order.dollar_rate || null,
-        obs: `Venda Direta - Pedido aprovado${order.notes ? '\n' + order.notes : ''}`,
-      }).select().single()
-    if (!sErr) saleId = sale.id
+    try {
+      const { data: sale, error: sErr } = await supabase
+        .from('sales').insert({
+          company_id: order.quarry_company_id,
+          client_id: clientId,
+          seller_id: null,
+          payment_method_id: order.payment_method_id || null,
+          total_brl: order.total_brl || 0,
+          total_usd: order.total_usd || 0,
+          dollar_rate: order.dollar_rate || null,
+          obs: `Venda Direta - Pedido aprovado${order.notes ? '\n' + order.notes : ''}`,
+        }).select().single()
+      if (sErr) {
+        console.warn('[approve] erro ao criar venda:', sErr)
+      } else {
+        saleId = sale.id
+      }
+      console.log('[approve] ✓ Venda:', saleId)
+    } catch (err) {
+      console.warn('[approve] exception venda:', err)
+    }
   }
 
-  // 3. Cria sale_blocks
+  // PASSO 5: sale_blocks
   const blockIds = (items || []).map(i => i.block_id).filter(Boolean)
   if (saleId && blockIds.length > 0) {
-    const saleBlocks = blockIds.map(bid => ({ sale_id: saleId, block_id: bid }))
-    await supabase.from('sale_blocks').insert(saleBlocks)
+    try {
+      const saleBlocks = blockIds.map(bid => ({ sale_id: saleId, block_id: bid }))
+      await supabase.from('sale_blocks').insert(saleBlocks)
+      console.log('[approve] ✓ sale_blocks criados')
+    } catch (err) {
+      console.warn('[approve] exception sale_blocks:', err)
+    }
   }
 
-  // 4. Sobrescreve dados dos blocos com valores negociados (preservando originais)
-  // E marca como sold
+  // PASSO 6: Atualiza blocos (sold + overrides)
   for (const item of (items || [])) {
     if (!item.block_id) continue
-    // Pega o bloco atual pra preservar originais (se ainda não foram preservados)
-    const { data: currentBlock } = await supabase
-      .from('blocks').select('*').eq('id', item.block_id).single()
-    if (!currentBlock) continue
-    
-    const updates = { status: 'sold' }
-    // Preserva originais se ainda não houver
-    if (currentBlock.original_total_value === null || currentBlock.original_total_value === undefined) {
-      updates.original_gross_l = currentBlock.gross_l
-      updates.original_gross_h = currentBlock.gross_h
-      updates.original_gross_w = currentBlock.gross_w
-      updates.original_gross_volume = currentBlock.gross_volume
-      updates.original_net_l = currentBlock.net_l
-      updates.original_net_h = currentBlock.net_h
-      updates.original_net_w = currentBlock.net_w
-      updates.original_net_volume = currentBlock.net_volume
-      updates.original_total_value = currentBlock.total_value
-      updates.original_price_m3 = currentBlock.price_m3
-      updates.original_currency = currentBlock.currency
+    try {
+      const { data: currentBlock } = await supabase
+        .from('blocks').select('*').eq('id', item.block_id).single()
+      if (!currentBlock) continue
+      const updates = { status: 'sold' }
+      if (currentBlock.original_total_value === null || currentBlock.original_total_value === undefined) {
+        updates.original_gross_l = currentBlock.gross_l
+        updates.original_gross_h = currentBlock.gross_h
+        updates.original_gross_w = currentBlock.gross_w
+        updates.original_gross_volume = currentBlock.gross_volume
+        updates.original_net_l = currentBlock.net_l
+        updates.original_net_h = currentBlock.net_h
+        updates.original_net_w = currentBlock.net_w
+        updates.original_net_volume = currentBlock.net_volume
+        updates.original_total_value = currentBlock.total_value
+        updates.original_price_m3 = currentBlock.price_m3
+        updates.original_currency = currentBlock.currency
+      }
+      if (item.gross_l) updates.gross_l = item.gross_l
+      if (item.gross_h) updates.gross_h = item.gross_h
+      if (item.gross_w) updates.gross_w = item.gross_w
+      if (item.gross_volume) updates.gross_volume = item.gross_volume
+      if (item.net_l) updates.net_l = item.net_l
+      if (item.net_h) updates.net_h = item.net_h
+      if (item.net_w) updates.net_w = item.net_w
+      if (item.net_volume) updates.net_volume = item.net_volume
+      if (item.total_value) updates.total_value = item.total_value
+      if (item.price_m3) updates.price_m3 = item.price_m3
+      if (item.currency) updates.currency = item.currency
+      if (order.dollar_rate) updates.sold_dollar_rate = order.dollar_rate
+      updates.overridden_by_buyer_at = new Date().toISOString()
+      updates.overridden_by_buyer_id = order.buyer_company_id
+      await supabase.from('blocks').update(updates).eq('id', item.block_id)
+    } catch (err) {
+      console.warn('[approve] exception update bloco:', err)
     }
-    // Sobrescreve com negociado
-    if (item.gross_l) updates.gross_l = item.gross_l
-    if (item.gross_h) updates.gross_h = item.gross_h
-    if (item.gross_w) updates.gross_w = item.gross_w
-    if (item.gross_volume) updates.gross_volume = item.gross_volume
-    if (item.net_l) updates.net_l = item.net_l
-    if (item.net_h) updates.net_h = item.net_h
-    if (item.net_w) updates.net_w = item.net_w
-    if (item.net_volume) updates.net_volume = item.net_volume
-    if (item.total_value) updates.total_value = item.total_value
-    if (item.price_m3) updates.price_m3 = item.price_m3
-    if (item.currency) updates.currency = item.currency
-    if (order.dollar_rate) updates.sold_dollar_rate = order.dollar_rate
-    updates.overridden_by_buyer_at = new Date().toISOString()
-    updates.overridden_by_buyer_id = order.buyer_company_id
-    
-    await supabase.from('blocks').update(updates).eq('id', item.block_id)
+  }
+  console.log('[approve] ✓ Blocos atualizados')
+
+  // PASSO 7: purchase do lado da indústria
+  let purchaseId = null
+  try {
+    const { data: purchase, error: pErr } = await supabase
+      .from('purchases').insert({
+        buyer_company_id: order.buyer_company_id,
+        inspection_id: order.inspection_id,
+        total_brl: order.total_brl || 0,
+        total_usd: order.total_usd || 0,
+        total_value: (order.total_usd || 0) > 0 ? order.total_usd : order.total_brl,
+        total_currency: (order.total_usd || 0) > 0 ? 'USD' : 'BRL',
+        dollar_rate: order.dollar_rate,
+        payment_method_id: order.payment_method_id,
+        payment_method_name: order.payment_method_name,
+        notes: order.notes,
+        quarry_company_id: order.quarry_company_id,
+        sale_id: saleId,
+        client_id_on_quarry: clientId,
+        finalized_by: profile.id,
+      }).select().single()
+    if (pErr) {
+      console.warn('[approve] erro ao criar purchase:', pErr)
+    } else {
+      purchaseId = purchase.id
+    }
+    console.log('[approve] ✓ Purchase:', purchaseId)
+  } catch (err) {
+    console.warn('[approve] exception purchase:', err)
   }
 
-  // 5. Cria registro purchase (lado indústria)
-  const { data: purchase } = await supabase
-    .from('purchases').insert({
-      buyer_company_id: order.buyer_company_id,
-      inspection_id: order.inspection_id,
-      total_brl: order.total_brl || 0,
-      total_usd: order.total_usd || 0,
-      total_value: (order.total_usd || 0) > 0 ? order.total_usd : order.total_brl,
-      total_currency: (order.total_usd || 0) > 0 ? 'USD' : 'BRL',
-      dollar_rate: order.dollar_rate,
-      payment_method_id: order.payment_method_id,
-      payment_method_name: order.payment_method_name,
-      notes: order.notes,
-      quarry_company_id: order.quarry_company_id,
+  // PASSO 8: Finaliza o purchase_order com ids
+  if (purchaseId || saleId) {
+    await supabase.from('purchase_orders').update({
+      purchase_id: purchaseId,
       sale_id: saleId,
-      client_id_on_quarry: clientId,
-      finalized_by: profile.id,
-    }).select().single()
-
-  // 6. Atualiza purchase_order
-  await supabase.from('purchase_orders').update({
-    status: 'approved',
-    approved_at: new Date().toISOString(),
-    approved_by: profile.id,
-    purchase_id: purchase?.id,
-    sale_id: saleId,
-  }).eq('id', orderId)
-
-  // 7. Atualiza inspeção
-  await supabase.from('inspections').update({
-    order_status: 'approved',
-    finalized_at: new Date().toISOString(),
-    finalized_by: profile.id,
-  }).eq('id', order.inspection_id)
-
-  // 8. Notifica equipes
-  const { data: quarryCompany } = await supabase
-    .from('profiles').select('name').eq('id', order.quarry_company_id).single()
-  const { data: quarryTeam } = await supabase
-    .from('profiles').select('id')
-    .or(`id.eq.${order.quarry_company_id},company_id.eq.${order.quarry_company_id}`)
-  for (const t of (quarryTeam || [])) {
-    await createIndNotification(t.id, '✅ Pedido aprovado',
-      `Pedido aprovado. Venda criada com ${blockIds.length} bloco(s).`)
-  }
-  const { data: buyerTeam } = await supabase
-    .from('profiles').select('id').eq('buyer_company_id', order.buyer_company_id)
-  for (const t of (buyerTeam || [])) {
-    await createIndNotification(t.id, '🎉 Pedido aprovado!',
-      `Seu pedido foi aprovado por ${quarryCompany?.name || 'a pedreira'}. Compra finalizada.`)
+    }).eq('id', orderId)
   }
 
-  return { purchase, saleId, orderId }
+  // PASSO 9: Notificações
+  try {
+    const { data: quarryCompany } = await supabase
+      .from('profiles').select('name').eq('id', order.quarry_company_id).single()
+    const { data: quarryTeam } = await supabase
+      .from('profiles').select('id')
+      .or(`id.eq.${order.quarry_company_id},company_id.eq.${order.quarry_company_id}`)
+    for (const t of (quarryTeam || [])) {
+      await createIndNotification(t.id, '✅ Pedido aprovado',
+        `Pedido aprovado. Venda criada com ${blockIds.length} bloco(s).`)
+    }
+    const { data: buyerTeam } = await supabase
+      .from('profiles').select('id').eq('buyer_company_id', order.buyer_company_id)
+    for (const t of (buyerTeam || [])) {
+      await createIndNotification(t.id, '🎉 Pedido aprovado!',
+        `Seu pedido foi aprovado por ${quarryCompany?.name || 'a pedreira'}. Compra finalizada.`)
+    }
+    console.log('[approve] ✓ Notificações enviadas')
+  } catch (err) {
+    console.warn('[approve] exception notificações:', err)
+  }
+
+  console.log('[approve] ✅ APROVAÇÃO COMPLETA')
+  return { purchaseId, saleId, orderId }
 }
-
