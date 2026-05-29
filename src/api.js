@@ -1266,6 +1266,7 @@ export async function loadBuyerCompanyData(profile) {
     visits,
     cartItems,
     purchases,
+    purchaseOrders,
   ] = await Promise.all([
     getBuyerCompany(companyId),
     supabase.from('profiles').select('*').eq('buyer_company_id', companyId).then(r => r.data || []),
@@ -1282,6 +1283,7 @@ export async function loadBuyerCompanyData(profile) {
       return items || []
     })(),
     supabase.from('purchases').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []).catch(() => []),
+    supabase.from('purchase_orders').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []).catch(() => []),
   ])
 
   // Carrega itens das listas
@@ -1314,6 +1316,7 @@ export async function loadBuyerCompanyData(profile) {
     externalQuarries,
     visits,
     purchases,
+    purchaseOrders,
   }
 }
 
@@ -1453,13 +1456,6 @@ export async function uploadInspectionPhoto(profile, file, refCode) {
 
 // ─── CRIAR INSPEÇÃO DE BLOCO (pedreira cadastrada) ──────────────
 export async function createInspection(profile, payload) {
-  // DIAGNÓSTICO: rastrear inspection_id
-  console.log('[createInspection] payload recebido:', {
-    original_block_id: payload.original_block_id,
-    inspection_id: payload.inspection_id,
-    buyer_company_id: profile?.buyer_company_id,
-  })
-
   // Calcula volumes automaticamente se medidas estiverem presentes
   const grossVol = (payload.negotiated_gross_l && payload.negotiated_gross_h && payload.negotiated_gross_w)
     ? parseFloat(payload.negotiated_gross_l) * parseFloat(payload.negotiated_gross_h) * parseFloat(payload.negotiated_gross_w)
@@ -1839,11 +1835,14 @@ export async function listIndQuarryCatalog(profile) {
   }
 
   // 3. Deduplica blocos (um bloco pode estar liberado pra mais de um cliente da mesma indústria)
+  // Filtra blocos com status 'reserved' (pedido pendente) e 'sold' (já vendidos)
   const seen = new Set()
   const blocks = []
   for (const r of (releases || [])) {
     const b = r.block
     if (!b || seen.has(b.id)) continue
+    // Filtra fora os blocos não-disponíveis
+    if (b.status === 'reserved' || b.status === 'sold') continue
     seen.add(b.id)
     blocks.push({
       ...b,
@@ -2314,3 +2313,416 @@ export async function addCatalogBlockToVisit(profile, blockOriginal, visitId) {
     negotiated_currency: blockOriginal.currency || 'USD',
   })
 }
+
+// ═══════════════════════════════════════════════════════════════
+// PEDIDO DE COMPRA — fluxo completo (Etapa 8)
+// ═══════════════════════════════════════════════════════════════
+
+// Indústria: envia pedido de compra a partir de uma inspeção
+export async function sendPurchaseOrder(profile, visitId, payload) {
+  if (!profile?.buyer_company_id) throw new Error('Sem indústria associada')
+
+  // 1. Carrega dados
+  const { data: visit, error: visitErr } = await supabase
+    .from('inspections').select('*').eq('id', visitId).single()
+  if (visitErr) throw visitErr
+  if (!visit.uses_stone_block) {
+    throw new Error('Pedidos só funcionam com pedreiras Stone Block. Para externas, use Finalizar Compra.')
+  }
+
+  const { data: buyerCompany } = await supabase
+    .from('buyer_companies').select('*').eq('id', profile.buyer_company_id).single()
+
+  const { data: insps } = await supabase
+    .from('block_inspections').select('*').eq('inspection_id', visitId)
+  if (!insps || insps.length === 0) {
+    throw new Error('Nenhum bloco inspecionado nesta visita.')
+  }
+
+  // 2. Carrega blocos originais
+  const origIds = insps.map(i => i.original_block_id)
+  const { data: blocks } = await supabase
+    .from('blocks').select('*').in('id', origIds)
+
+  if (!blocks || blocks.length === 0) {
+    throw new Error('Blocos originais não encontrados.')
+  }
+  const quarryCompanyId = blocks[0].company_id
+
+  // 3. Calcula totais
+  let totalBRL = 0, totalUSD = 0
+  for (const i of insps) {
+    const orig = blocks.find(b => b.id === i.original_block_id)
+    const val = Number(i.negotiated_value) || Number(orig?.total_value) || 0
+    const cur = i.negotiated_currency || orig?.currency || 'USD'
+    if (cur === 'USD') totalUSD += val
+    else totalBRL += val
+  }
+
+  // 4. Cria purchase_order
+  const { data: order, error: orderErr } = await supabase
+    .from('purchase_orders')
+    .insert({
+      buyer_company_id: profile.buyer_company_id,
+      inspection_id: visitId,
+      quarry_company_id: quarryCompanyId,
+      status: 'pending',
+      total_brl: totalBRL,
+      total_usd: totalUSD,
+      dollar_rate: payload.dollar_rate || null,
+      payment_method_id: payload.payment_method_id || null,
+      payment_method_name: payload.payment_method_name || null,
+      notes: payload.notes || null,
+      sent_by: profile.id,
+      sent_at: new Date().toISOString(),
+    }).select().single()
+  if (orderErr) throw orderErr
+
+  // 5. Cria items (snapshot dos blocos)
+  const items = insps.map(i => {
+    const orig = blocks.find(b => b.id === i.original_block_id)
+    const gL = i.negotiated_gross_l || orig?.gross_l
+    const gH = i.negotiated_gross_h || orig?.gross_h
+    const gW = i.negotiated_gross_w || orig?.gross_w
+    const gVol = i.negotiated_gross_volume || orig?.gross_volume
+    const nL = i.negotiated_l || orig?.net_l
+    const nH = i.negotiated_h || orig?.net_h
+    const nW = i.negotiated_w || orig?.net_w
+    const nVol = i.negotiated_net_volume || orig?.net_volume
+    const val = Number(i.negotiated_value) || Number(orig?.total_value) || 0
+    const cur = i.negotiated_currency || orig?.currency || 'USD'
+    const m3 = nVol > 0 ? val / nVol : null
+    return {
+      purchase_order_id: order.id,
+      block_id: orig?.id,
+      block_inspection_id: i.id,
+      code: orig?.code,
+      material: orig?.material,
+      gross_l: gL, gross_h: gH, gross_w: gW, gross_volume: gVol,
+      net_l: nL, net_h: nH, net_w: nW, net_volume: nVol,
+      total_value: val,
+      currency: cur,
+      price_m3: m3,
+    }
+  })
+  await supabase.from('purchase_order_items').insert(items)
+
+  // 6. Reserva os blocos (status = 'reserved')
+  await supabase.from('blocks').update({ status: 'reserved' }).in('id', origIds)
+
+  // 7. Marca inspeção como "awaiting"
+  await supabase.from('inspections').update({
+    status: 'closed',
+    order_status: 'awaiting',
+  }).eq('id', visitId)
+
+  // 8. Notifica equipe da pedreira (todos)
+  const { data: quarryTeam } = await supabase
+    .from('profiles').select('id')
+    .or(`id.eq.${quarryCompanyId},company_id.eq.${quarryCompanyId}`)
+  for (const t of (quarryTeam || [])) {
+    await createIndNotification(
+      t.id,
+      '📥 Novo Pedido de Compra',
+      `${buyerCompany?.name || 'Uma indústria'} enviou um pedido com ${insps.length} bloco(s). Total US$${totalUSD.toFixed(2)} / R$${totalBRL.toFixed(2)}`
+    )
+  }
+
+  // 9. Notifica equipe da indústria
+  const { data: buyerTeam } = await supabase
+    .from('profiles').select('id').eq('buyer_company_id', profile.buyer_company_id)
+  for (const t of (buyerTeam || [])) {
+    await createIndNotification(
+      t.id,
+      '📤 Pedido enviado',
+      `Pedido com ${insps.length} bloco(s) enviado. Aguardando aprovação.`
+    )
+  }
+
+  return { order, itemsCount: items.length, totalBRL, totalUSD }
+}
+
+// Lista pedidos da indústria (todos os status)
+export async function listPurchaseOrdersForBuyer(profile) {
+  if (!profile?.buyer_company_id) return []
+  const { data, error } = await supabase
+    .from('purchase_orders').select('*')
+    .eq('buyer_company_id', profile.buyer_company_id)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+// Lista pedidos chegando na pedreira
+export async function listPurchaseOrdersForQuarry(profile) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+  const { data, error } = await supabase
+    .from('purchase_orders').select('*')
+    .eq('quarry_company_id', companyId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+// Carrega itens de um pedido
+export async function listPurchaseOrderItems(orderId) {
+  const { data, error } = await supabase
+    .from('purchase_order_items').select('*')
+    .eq('purchase_order_id', orderId)
+  if (error) throw error
+  return data || []
+}
+
+// Indústria cancela pedido (enquanto pendente)
+export async function cancelPurchaseOrder(profile, orderId) {
+  const { data: order, error: e1 } = await supabase
+    .from('purchase_orders').select('*').eq('id', orderId).single()
+  if (e1) throw e1
+  if (order.status !== 'pending') throw new Error('Só é possível cancelar pedido pendente.')
+
+  await supabase.from('purchase_orders').update({
+    status: 'cancelled',
+    cancelled_at: new Date().toISOString(),
+    cancelled_by: profile.id,
+  }).eq('id', orderId)
+
+  // Devolve blocos pra available
+  const { data: items } = await supabase
+    .from('purchase_order_items').select('block_id').eq('purchase_order_id', orderId)
+  const blockIds = (items || []).map(i => i.block_id).filter(Boolean)
+  if (blockIds.length > 0) {
+    await supabase.from('blocks').update({ status: 'available' }).in('id', blockIds)
+  }
+
+  // Atualiza inspeção
+  await supabase.from('inspections').update({
+    order_status: 'cancelled',
+  }).eq('id', order.inspection_id)
+
+  // Notifica equipes
+  const { data: buyerCompany } = await supabase
+    .from('buyer_companies').select('name').eq('id', order.buyer_company_id).single()
+  const { data: quarryTeam } = await supabase
+    .from('profiles').select('id')
+    .or(`id.eq.${order.quarry_company_id},company_id.eq.${order.quarry_company_id}`)
+  for (const t of (quarryTeam || [])) {
+    await createIndNotification(t.id, '🚫 Pedido cancelado',
+      `${buyerCompany?.name} cancelou um pedido de compra.`)
+  }
+  const { data: buyerTeam } = await supabase
+    .from('profiles').select('id').eq('buyer_company_id', order.buyer_company_id)
+  for (const t of (buyerTeam || [])) {
+    await createIndNotification(t.id, '🚫 Pedido cancelado',
+      'O pedido de compra foi cancelado.')
+  }
+}
+
+// Pedreira rejeita pedido
+export async function rejectPurchaseOrder(profile, orderId, reason) {
+  const { data: order, error: e1 } = await supabase
+    .from('purchase_orders').select('*').eq('id', orderId).single()
+  if (e1) throw e1
+  if (order.status !== 'pending') throw new Error('Pedido não está pendente.')
+
+  await supabase.from('purchase_orders').update({
+    status: 'rejected',
+    rejected_at: new Date().toISOString(),
+    rejected_by: profile.id,
+    rejection_reason: reason || null,
+  }).eq('id', orderId)
+
+  // Devolve blocos pra available
+  const { data: items } = await supabase
+    .from('purchase_order_items').select('block_id').eq('purchase_order_id', orderId)
+  const blockIds = (items || []).map(i => i.block_id).filter(Boolean)
+  if (blockIds.length > 0) {
+    await supabase.from('blocks').update({ status: 'available' }).in('id', blockIds)
+  }
+
+  // Atualiza inspeção
+  await supabase.from('inspections').update({
+    order_status: 'rejected',
+  }).eq('id', order.inspection_id)
+
+  // Notifica equipes
+  const { data: quarryCompany } = await supabase
+    .from('profiles').select('name').eq('id', order.quarry_company_id).single()
+  const { data: quarryTeam } = await supabase
+    .from('profiles').select('id')
+    .or(`id.eq.${order.quarry_company_id},company_id.eq.${order.quarry_company_id}`)
+  for (const t of (quarryTeam || [])) {
+    await createIndNotification(t.id, '❌ Pedido rejeitado',
+      `Pedido rejeitado${reason ? ': ' + reason : '.'}`)
+  }
+  const { data: buyerTeam } = await supabase
+    .from('profiles').select('id').eq('buyer_company_id', order.buyer_company_id)
+  for (const t of (buyerTeam || [])) {
+    await createIndNotification(t.id, '❌ Pedido rejeitado',
+      `Seu pedido foi rejeitado${reason ? ': ' + reason : '.'} por ${quarryCompany?.name || 'a pedreira'}.`)
+  }
+}
+
+// Pedreira aprova pedido → cria venda + purchase + baixa blocos
+export async function approvePurchaseOrder(profile, orderId) {
+  const { data: order, error: e1 } = await supabase
+    .from('purchase_orders').select('*').eq('id', orderId).single()
+  if (e1) throw e1
+  if (order.status !== 'pending') throw new Error('Pedido não está pendente.')
+
+  const { data: items } = await supabase
+    .from('purchase_order_items').select('*').eq('purchase_order_id', orderId)
+
+  // Carrega buyer_company para nome do cliente
+  const { data: buyerCompany } = await supabase
+    .from('buyer_companies').select('*').eq('id', order.buyer_company_id).single()
+
+  // 1. Cria/encontra cliente automático na pedreira
+  let clientId = null
+  const { data: existingClient } = await supabase
+    .from('clients').select('*')
+    .eq('company_id', order.quarry_company_id)
+    .ilike('name', buyerCompany?.name || '')
+    .maybeSingle()
+  if (existingClient) {
+    clientId = existingClient.id
+    // Garante vínculo
+    if (!existingClient.buyer_company_id) {
+      await supabase.from('clients').update({
+        buyer_company_id: order.buyer_company_id,
+      }).eq('id', existingClient.id)
+    }
+  } else {
+    const { data: newClient, error: cErr } = await supabase
+      .from('clients').insert({
+        company_id: order.quarry_company_id,
+        name: buyerCompany?.name || 'Indústria',
+        country: 'BR',
+        email: buyerCompany?.contact_email || null,
+        phone: buyerCompany?.contact_phone || null,
+        buyer_company_id: order.buyer_company_id,
+      }).select().single()
+    if (!cErr) clientId = newClient.id
+  }
+
+  // 2. Cria venda no lado da pedreira
+  let saleId = null
+  if (clientId) {
+    const { data: sale, error: sErr } = await supabase
+      .from('sales').insert({
+        company_id: order.quarry_company_id,
+        client_id: clientId,
+        seller_id: null, // venda direta marketplace
+        payment_method_id: order.payment_method_id || null,
+        total_brl: order.total_brl || 0,
+        total_usd: order.total_usd || 0,
+        dollar_rate: order.dollar_rate || null,
+        obs: `Venda Direta - Pedido aprovado${order.notes ? '\n' + order.notes : ''}`,
+      }).select().single()
+    if (!sErr) saleId = sale.id
+  }
+
+  // 3. Cria sale_blocks
+  const blockIds = (items || []).map(i => i.block_id).filter(Boolean)
+  if (saleId && blockIds.length > 0) {
+    const saleBlocks = blockIds.map(bid => ({ sale_id: saleId, block_id: bid }))
+    await supabase.from('sale_blocks').insert(saleBlocks)
+  }
+
+  // 4. Sobrescreve dados dos blocos com valores negociados (preservando originais)
+  // E marca como sold
+  for (const item of (items || [])) {
+    if (!item.block_id) continue
+    // Pega o bloco atual pra preservar originais (se ainda não foram preservados)
+    const { data: currentBlock } = await supabase
+      .from('blocks').select('*').eq('id', item.block_id).single()
+    if (!currentBlock) continue
+    
+    const updates = { status: 'sold' }
+    // Preserva originais se ainda não houver
+    if (currentBlock.original_total_value === null || currentBlock.original_total_value === undefined) {
+      updates.original_gross_l = currentBlock.gross_l
+      updates.original_gross_h = currentBlock.gross_h
+      updates.original_gross_w = currentBlock.gross_w
+      updates.original_gross_volume = currentBlock.gross_volume
+      updates.original_net_l = currentBlock.net_l
+      updates.original_net_h = currentBlock.net_h
+      updates.original_net_w = currentBlock.net_w
+      updates.original_net_volume = currentBlock.net_volume
+      updates.original_total_value = currentBlock.total_value
+      updates.original_price_m3 = currentBlock.price_m3
+      updates.original_currency = currentBlock.currency
+    }
+    // Sobrescreve com negociado
+    if (item.gross_l) updates.gross_l = item.gross_l
+    if (item.gross_h) updates.gross_h = item.gross_h
+    if (item.gross_w) updates.gross_w = item.gross_w
+    if (item.gross_volume) updates.gross_volume = item.gross_volume
+    if (item.net_l) updates.net_l = item.net_l
+    if (item.net_h) updates.net_h = item.net_h
+    if (item.net_w) updates.net_w = item.net_w
+    if (item.net_volume) updates.net_volume = item.net_volume
+    if (item.total_value) updates.total_value = item.total_value
+    if (item.price_m3) updates.price_m3 = item.price_m3
+    if (item.currency) updates.currency = item.currency
+    if (order.dollar_rate) updates.sold_dollar_rate = order.dollar_rate
+    updates.overridden_by_buyer_at = new Date().toISOString()
+    updates.overridden_by_buyer_id = order.buyer_company_id
+    
+    await supabase.from('blocks').update(updates).eq('id', item.block_id)
+  }
+
+  // 5. Cria registro purchase (lado indústria)
+  const { data: purchase } = await supabase
+    .from('purchases').insert({
+      buyer_company_id: order.buyer_company_id,
+      inspection_id: order.inspection_id,
+      total_brl: order.total_brl || 0,
+      total_usd: order.total_usd || 0,
+      total_value: (order.total_usd || 0) > 0 ? order.total_usd : order.total_brl,
+      total_currency: (order.total_usd || 0) > 0 ? 'USD' : 'BRL',
+      dollar_rate: order.dollar_rate,
+      payment_method_id: order.payment_method_id,
+      payment_method_name: order.payment_method_name,
+      notes: order.notes,
+      quarry_company_id: order.quarry_company_id,
+      sale_id: saleId,
+      client_id_on_quarry: clientId,
+      finalized_by: profile.id,
+    }).select().single()
+
+  // 6. Atualiza purchase_order
+  await supabase.from('purchase_orders').update({
+    status: 'approved',
+    approved_at: new Date().toISOString(),
+    approved_by: profile.id,
+    purchase_id: purchase?.id,
+    sale_id: saleId,
+  }).eq('id', orderId)
+
+  // 7. Atualiza inspeção
+  await supabase.from('inspections').update({
+    order_status: 'approved',
+    finalized_at: new Date().toISOString(),
+    finalized_by: profile.id,
+  }).eq('id', order.inspection_id)
+
+  // 8. Notifica equipes
+  const { data: quarryCompany } = await supabase
+    .from('profiles').select('name').eq('id', order.quarry_company_id).single()
+  const { data: quarryTeam } = await supabase
+    .from('profiles').select('id')
+    .or(`id.eq.${order.quarry_company_id},company_id.eq.${order.quarry_company_id}`)
+  for (const t of (quarryTeam || [])) {
+    await createIndNotification(t.id, '✅ Pedido aprovado',
+      `Pedido aprovado. Venda criada com ${blockIds.length} bloco(s).`)
+  }
+  const { data: buyerTeam } = await supabase
+    .from('profiles').select('id').eq('buyer_company_id', order.buyer_company_id)
+  for (const t of (buyerTeam || [])) {
+    await createIndNotification(t.id, '🎉 Pedido aprovado!',
+      `Seu pedido foi aprovado por ${quarryCompany?.name || 'a pedreira'}. Compra finalizada.`)
+  }
+
+  return { purchase, saleId, orderId }
+}
+

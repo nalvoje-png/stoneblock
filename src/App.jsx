@@ -7418,10 +7418,25 @@ function IndVisitDetailPage({ profile, buyerData, onChange, toast, visitId, setP
             )}
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {visit.finalized_at ? (
-              <span className="bdg" style={{ background: '#dcfce7', color: '#15803d', fontSize: 12, padding: '6px 12px', fontWeight: 700 }}>
-                ✅ Compra Finalizada em {fmtDate(visit.finalized_at)}
+            {visit.order_status === 'awaiting' ? (
+              <span className="bdg" style={{ background: '#fef3c7', color: '#854d0e', fontSize: 12, padding: '6px 12px', fontWeight: 700 }}>
+                ⏳ Aguardando aprovação da pedreira
               </span>
+            ) : visit.order_status === 'approved' || visit.finalized_at ? (
+              <span className="bdg" style={{ background: '#dcfce7', color: '#15803d', fontSize: 12, padding: '6px 12px', fontWeight: 700 }}>
+                ✅ Compra Finalizada{visit.finalized_at ? ` em ${fmtDate(visit.finalized_at)}` : ''}
+              </span>
+            ) : visit.order_status === 'rejected' ? (
+              <>
+                <span className="bdg" style={{ background: '#fee2e2', color: '#991b1b', fontSize: 12, padding: '6px 12px', fontWeight: 700 }}>
+                  ❌ Pedido rejeitado
+                </span>
+                {totalBlocks > 0 && (
+                  <button className="btn bb" onClick={() => setShowFinalize(true)}>
+                    📤 Reenviar Pedido
+                  </button>
+                )}
+              </>
             ) : (
               <>
                 <button className="btn bb" onClick={() => setShowAddBlock(true)}>
@@ -7429,7 +7444,7 @@ function IndVisitDetailPage({ profile, buyerData, onChange, toast, visitId, setP
                 </button>
                 {totalBlocks > 0 && (
                   <button className="btn" style={{ background: 'var(--ok)', color: '#fff' }} onClick={() => setShowFinalize(true)}>
-                    💰 Finalizar Compra
+                    {visit.uses_stone_block ? '📤 Enviar Pedido de Compra' : '💰 Finalizar Compra'}
                   </button>
                 )}
                 {visit.status === 'open' ? (
@@ -8365,30 +8380,40 @@ function FinalizeInspectionPurchaseModal({ profile, buyerData, visit, onClose, o
     }
     setSaving(true)
     try {
-      const result = await api.finalizeInspectionPurchase(profile, visit.id, {
+      const payload = {
         dollar_rate: dollarRate,
         payment_method_id: form.payment_method_id || null,
         payment_method_name: form.payment_method_name || null,
         notes: form.notes.trim() || null,
-      })
-      toast('✅ Compra finalizada!', 'ok')
+      }
+      let result
+      if (visit.uses_stone_block) {
+        // Stone Block: envia PEDIDO de compra (aguarda aprovação da pedreira)
+        result = await api.sendPurchaseOrder(profile, visit.id, payload)
+        toast('📤 Pedido de compra enviado! Aguarde aprovação da pedreira.', 'ok')
+      } else {
+        // Externa: finaliza direto
+        result = await api.finalizeInspectionPurchase(profile, visit.id, payload)
+        toast('✅ Compra finalizada!', 'ok')
+      }
       if (onFinalized) await onFinalized(result)
     } catch (e) {
-      console.error('Erro finalizar:', e)
+      console.error('Erro:', e)
       toast('Erro: ' + e.message, 'err')
     } finally { setSaving(false) }
   }
 
   const totalBlocks = inspectionsHere.length + externalsHere.length
+  const isOrder = visit.uses_stone_block
 
   return (
     <div className="mo" onClick={onClose}>
       <div className="md" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
         <div className="mhead">
           <div>
-            <div className="mtit">💰 Finalizar Compra</div>
+            <div className="mtit">{isOrder ? '📤 Enviar Pedido de Compra' : '💰 Finalizar Compra'}</div>
             <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>
-              {totalBlocks} bloco(s) · Esta ação é definitiva
+              {totalBlocks} bloco(s) · {isOrder ? 'Aguarda aprovação da pedreira' : 'Esta ação é definitiva'}
             </div>
           </div>
           <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
@@ -8474,23 +8499,34 @@ function FinalizeInspectionPurchaseModal({ profile, buyerData, visit, onClose, o
                 <textarea className="fc" rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
               </div>
 
-              {/* Aviso de ação definitiva */}
-              <div style={{ background: '#fee2e2', padding: 12, borderRadius: 8, fontSize: 13, color: '#991b1b', lineHeight: 1.5 }}>
-                ⚠️ <strong>Esta ação é definitiva.</strong> Após confirmar:
-                <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
-                  {visit.uses_stone_block && <li>Os blocos serão marcados como vendidos na pedreira</li>}
-                  {visit.uses_stone_block && <li>Será criada uma venda no sistema da pedreira</li>}
-                  <li>Romaneios serão gerados em PDF</li>
-                  <li>Notificações serão enviadas a todos os envolvidos</li>
-                </ul>
-              </div>
+              {/* Aviso */}
+              {isOrder ? (
+                <div style={{ background: '#fef3c7', padding: 12, borderRadius: 8, fontSize: 13, color: '#854d0e', lineHeight: 1.5 }}>
+                  📋 <strong>Como funciona o pedido de compra:</strong>
+                  <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                    <li>Os blocos ficarão reservados (somem do catálogo)</li>
+                    <li>A pedreira recebe o pedido e decide aprovar ou rejeitar</li>
+                    <li>Se aprovar: compra finalizada automaticamente</li>
+                    <li>Se rejeitar: blocos voltam ao catálogo</li>
+                    <li>Você pode cancelar o pedido enquanto estiver pendente</li>
+                  </ul>
+                </div>
+              ) : (
+                <div style={{ background: '#fee2e2', padding: 12, borderRadius: 8, fontSize: 13, color: '#991b1b', lineHeight: 1.5 }}>
+                  ⚠️ <strong>Esta ação é definitiva.</strong> Após confirmar:
+                  <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                    <li>Os blocos serão marcados como comprados</li>
+                    <li>Notificações serão enviadas à equipe</li>
+                  </ul>
+                </div>
+              )}
             </>
           )}
         </div>
         <div className="mfoot">
           <button className="btn bo" onClick={onClose} disabled={saving}>Cancelar</button>
           <button className="btn bb" onClick={save} disabled={saving || loading}>
-            {saving ? <><span className="spinner"></span> Finalizando</> : '✓ Confirmar Compra'}
+            {saving ? <><span className="spinner"></span> Enviando</> : (isOrder ? '📤 Enviar Pedido' : '✓ Confirmar Compra')}
           </button>
         </div>
       </div>
@@ -8501,6 +8537,405 @@ function FinalizeInspectionPurchaseModal({ profile, buyerData, visit, onClose, o
 // ═══════════════════════════════════════════════════════════════
 // IND BOUGHT BLOCKS — lista de blocos comprados (bloco a bloco)
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// IND ORDERS — meus pedidos de compra (indústria)
+// ═══════════════════════════════════════════════════════════════
+function IndOrdersPage({ profile, buyerData, onChange, toast }) {
+  const orders = buyerData?.purchaseOrders || []
+  const visits = buyerData?.visits || []
+  const externalQuarries = buyerData?.externalQuarries || []
+  const team = buyerData?.team || []
+
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [detail, setDetail] = useState(null)
+
+  const filtered = orders.filter(o => {
+    if (filterStatus !== 'all' && o.status !== filterStatus) return false
+    return true
+  })
+
+  const counts = {
+    all: orders.length,
+    pending: orders.filter(o => o.status === 'pending').length,
+    approved: orders.filter(o => o.status === 'approved').length,
+    rejected: orders.filter(o => o.status === 'rejected').length,
+    cancelled: orders.filter(o => o.status === 'cancelled').length,
+  }
+
+  const cancel = async (order) => {
+    if (!confirm('Cancelar este pedido?\n\nOs blocos voltarão a ficar disponíveis no catálogo.')) return
+    try {
+      await api.cancelPurchaseOrder(profile, order.id)
+      toast('Pedido cancelado.', 'ok')
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const statusBadge = (s) => {
+    if (s === 'pending') return <span className="bdg" style={{ background: '#fef3c7', color: '#854d0e' }}>⏳ Pendente</span>
+    if (s === 'approved') return <span className="bdg" style={{ background: '#dcfce7', color: '#15803d' }}>✅ Aprovado</span>
+    if (s === 'rejected') return <span className="bdg" style={{ background: '#fee2e2', color: '#991b1b' }}>❌ Rejeitado</span>
+    if (s === 'cancelled') return <span className="bdg" style={{ background: '#f3f4f6', color: '#6b7280' }}>🚫 Cancelado</span>
+    return null
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">📋 Meus Pedidos</div>
+        <div className="psub">{filtered.length} pedido(s) {filterStatus !== 'all' ? `(${filterStatus})` : ''}</div>
+      </div>
+
+      {/* Filtros de status */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+        {[
+          { v: 'all',       l: `Todos (${counts.all})`,       },
+          { v: 'pending',   l: `⏳ Pendentes (${counts.pending})`,   },
+          { v: 'approved',  l: `✅ Aprovados (${counts.approved})`,  },
+          { v: 'rejected',  l: `❌ Rejeitados (${counts.rejected})`, },
+          { v: 'cancelled', l: `🚫 Cancelados (${counts.cancelled})`,},
+        ].map(t => (
+          <button key={t.v}
+            className={'btn bsm ' + (filterStatus === t.v ? 'bb' : 'bo')}
+            onClick={() => setFilterStatus(t.v)}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="card" s={48} /></div>
+          <div className="estit">{orders.length === 0 ? 'Nenhum pedido ainda' : 'Nenhum pedido com este filtro'}</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))' }}>
+          {filtered.map(o => {
+            const visit = visits.find(v => v.id === o.inspection_id)
+            const quarry = visit ? externalQuarries.find(q => q.id === visit.external_quarry_id) : null
+            const marker = visit ? team.find(m => m.id === visit.marker_id) : null
+            return (
+              <div key={o.id} className="card" style={{ borderTop: `4px solid ${o.status === 'pending' ? '#f59e0b' : o.status === 'approved' ? '#10b981' : o.status === 'rejected' ? '#ef4444' : '#9ca3af'}` }}>
+                <div className="cb">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    {statusBadge(o.status)}
+                    <span style={{ fontSize: 11, color: 'var(--mist)' }}>{fmtDate(o.created_at)}</span>
+                  </div>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, marginBottom: 4 }}>📍 {quarry?.name || '—'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--mist)', marginBottom: 8 }}>👤 {marker?.name || '—'}</div>
+                  {o.total_usd > 0 && <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--sap7)' }}>{money(o.total_usd, 'USD')}</div>}
+                  {o.total_brl > 0 && <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--sap7)' }}>{money(o.total_brl, 'BRL')}</div>}
+                  {o.payment_method_name && <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 4 }}>💳 {o.payment_method_name}</div>}
+                  {o.rejection_reason && <div style={{ fontSize: 12, color: '#991b1b', marginTop: 6, background: '#fee2e2', padding: 6, borderRadius: 6 }}>Motivo: {o.rejection_reason}</div>}
+
+                  <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+                    <button className="btn bo bsm" onClick={() => setDetail({ order: o, visit, quarry, marker })}>
+                      Ver Detalhes
+                    </button>
+                    {o.status === 'pending' && (
+                      <button className="btn bsm" style={{ background: '#fee2e2', color: '#991b1b' }} onClick={() => cancel(o)}>
+                        🚫 Cancelar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {detail && <PurchaseOrderDetailModal item={detail} onClose={() => setDetail(null)} />}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PURCHASE ORDER DETAIL MODAL — usado pelos dois lados
+// ═══════════════════════════════════════════════════════════════
+function PurchaseOrderDetailModal({ item, onClose, isQuarrySide, profile, toast, onAction }) {
+  const { order, visit, quarry, marker, buyerName } = item
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [acting, setActing] = useState(false)
+  const [showRejectInput, setShowRejectInput] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
+
+  useEffect(() => {
+    ;(async () => {
+      setLoading(true)
+      try {
+        const data = await api.listPurchaseOrderItems(order.id)
+        setItems(data)
+      } catch (e) {
+        console.error(e)
+      } finally { setLoading(false) }
+    })()
+  }, [order.id])
+
+  const approve = async () => {
+    if (!confirm('Aprovar este pedido?\n\nA venda será criada automaticamente e os blocos serão marcados como vendidos.')) return
+    setActing(true)
+    try {
+      await api.approvePurchaseOrder(profile, order.id)
+      toast('Pedido aprovado!', 'ok')
+      if (onAction) await onAction()
+      onClose()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setActing(false) }
+  }
+
+  const reject = async () => {
+    if (!rejectReason.trim()) { toast('Informe um motivo.', 'err'); return }
+    setActing(true)
+    try {
+      await api.rejectPurchaseOrder(profile, order.id, rejectReason.trim())
+      toast('Pedido rejeitado.', 'ok')
+      if (onAction) await onAction()
+      onClose()
+    } catch (e) { toast('Erro: ' + e.message, 'err') } finally { setActing(false) }
+  }
+
+  const statusBadge = (s) => {
+    if (s === 'pending') return <span className="bdg" style={{ background: '#fef3c7', color: '#854d0e' }}>⏳ Pendente</span>
+    if (s === 'approved') return <span className="bdg" style={{ background: '#dcfce7', color: '#15803d' }}>✅ Aprovado</span>
+    if (s === 'rejected') return <span className="bdg" style={{ background: '#fee2e2', color: '#991b1b' }}>❌ Rejeitado</span>
+    if (s === 'cancelled') return <span className="bdg" style={{ background: '#f3f4f6', color: '#6b7280' }}>🚫 Cancelado</span>
+    return null
+  }
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 760 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div>
+            <div className="mtit">📋 Pedido #{order.id?.slice(0, 8)}</div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {statusBadge(order.status)}
+              <span>· {fmtDate(order.created_at)}</span>
+            </div>
+          </div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          <div style={{ background: 'var(--haze)', padding: 14, borderRadius: 10, marginBottom: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 10, fontSize: 13 }}>
+              {isQuarrySide && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Indústria</div>
+                  <div style={{ fontWeight: 700 }}>{buyerName || '—'}</div>
+                </div>
+              )}
+              {!isQuarrySide && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Pedreira</div>
+                  <div style={{ fontWeight: 700 }}>{quarry?.name || '—'}</div>
+                </div>
+              )}
+              {marker && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Marcador</div>
+                  <div style={{ fontWeight: 700 }}>{marker.name}</div>
+                </div>
+              )}
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Pagamento</div>
+                <div style={{ fontWeight: 700 }}>{order.payment_method_name || '—'}</div>
+              </div>
+              {order.dollar_rate && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Dólar</div>
+                  <div style={{ fontWeight: 700 }}>R$ {Number(order.dollar_rate).toFixed(4)}</div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--fog)', marginTop: 10, paddingTop: 10 }}>
+              {order.total_usd > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total USD:</span><strong style={{ color: 'var(--sap7)' }}>{money(order.total_usd, 'USD')}</strong></div>}
+              {order.total_brl > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total BRL:</span><strong style={{ color: 'var(--sap7)' }}>{money(order.total_brl, 'BRL')}</strong></div>}
+            </div>
+
+            {order.notes && (
+              <div style={{ marginTop: 10, fontSize: 13 }}>
+                <strong>Observações:</strong> {order.notes}
+              </div>
+            )}
+
+            {order.rejection_reason && (
+              <div style={{ marginTop: 10, fontSize: 13, background: '#fee2e2', padding: 10, borderRadius: 8, color: '#991b1b' }}>
+                <strong>Motivo da rejeição:</strong> {order.rejection_reason}
+              </div>
+            )}
+          </div>
+
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+            🏗️ {items.length} bloco(s) no pedido
+          </div>
+
+          {loading ? (
+            <div style={{ padding: 20, textAlign: 'center', color: 'var(--mist)' }}><span className="spinner"></span> Carregando blocos...</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {items.map(it => (
+                <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, background: 'var(--haze)', borderRadius: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700 }}>{it.code || '?'}</div>
+                    <div style={{ fontSize: 12, color: 'var(--mist)' }}>{it.material}</div>
+                    {it.net_volume && <div style={{ fontSize: 11, color: 'var(--mist)' }}>{Number(it.net_volume).toFixed(2)} m³{it.price_m3 ? ` · ${money(it.price_m3, it.currency)}/m³` : ''}</div>}
+                  </div>
+                  <div style={{ fontWeight: 700, color: 'var(--sap7)' }}>{money(it.total_value, it.currency)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Rejeição: input de motivo */}
+          {showRejectInput && order.status === 'pending' && isQuarrySide && (
+            <div style={{ marginTop: 14, padding: 14, background: '#fee2e2', borderRadius: 10 }}>
+              <div className="fl" style={{ color: '#991b1b' }}>Motivo da rejeição *</div>
+              <textarea className="fc" rows={2} value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Ex: bloco já vendido, preço inadequado..." />
+              <div style={{ display: 'flex', gap: 8, marginTop: 8, justifyContent: 'flex-end' }}>
+                <button className="btn bo bsm" onClick={() => { setShowRejectInput(false); setRejectReason('') }}>Cancelar</button>
+                <button className="btn bsm" style={{ background: '#ef4444', color: '#fff' }} onClick={reject} disabled={acting}>
+                  {acting ? 'Rejeitando...' : 'Confirmar Rejeição'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose} disabled={acting}>Fechar</button>
+          {/* Botões da pedreira */}
+          {isQuarrySide && order.status === 'pending' && !showRejectInput && (
+            <>
+              <button className="btn" style={{ background: '#ef4444', color: '#fff' }} onClick={() => setShowRejectInput(true)} disabled={acting}>
+                ❌ Rejeitar
+              </button>
+              <button className="btn" style={{ background: '#10b981', color: '#fff' }} onClick={approve} disabled={acting}>
+                {acting ? 'Aprovando...' : '✅ Aprovar Pedido'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// QUARRY PURCHASE ORDERS — lado pedreira (aprovar/rejeitar)
+// ═══════════════════════════════════════════════════════════════
+function QuarryPurchaseOrdersPage({ profile, onChange, toast }) {
+  const [orders, setOrders] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [buyerNames, setBuyerNames] = useState({})
+  const [filterStatus, setFilterStatus] = useState('pending')
+  const [detail, setDetail] = useState(null)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const data = await api.listPurchaseOrdersForQuarry(profile)
+      setOrders(data)
+      // Carrega nomes das indústrias
+      const buyerIds = [...new Set(data.map(o => o.buyer_company_id).filter(Boolean))]
+      if (buyerIds.length > 0) {
+        const { data: bs } = await supabase
+          .from('buyer_companies').select('id, name').in('id', buyerIds)
+        const m = {}
+        for (const b of (bs || [])) m[b.id] = b.name
+        setBuyerNames(m)
+      }
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setLoading(false) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const filtered = orders.filter(o => filterStatus === 'all' || o.status === filterStatus)
+
+  const counts = {
+    all: orders.length,
+    pending: orders.filter(o => o.status === 'pending').length,
+    approved: orders.filter(o => o.status === 'approved').length,
+    rejected: orders.filter(o => o.status === 'rejected').length,
+    cancelled: orders.filter(o => o.status === 'cancelled').length,
+  }
+
+  const statusBadge = (s) => {
+    if (s === 'pending') return <span className="bdg" style={{ background: '#fef3c7', color: '#854d0e' }}>⏳ Pendente</span>
+    if (s === 'approved') return <span className="bdg" style={{ background: '#dcfce7', color: '#15803d' }}>✅ Aprovado</span>
+    if (s === 'rejected') return <span className="bdg" style={{ background: '#fee2e2', color: '#991b1b' }}>❌ Rejeitado</span>
+    if (s === 'cancelled') return <span className="bdg" style={{ background: '#f3f4f6', color: '#6b7280' }}>🚫 Cancelado</span>
+    return null
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div className="ptit">📥 Pedido de Compra</div>
+        <div className="psub">{filtered.length} pedido(s) {filterStatus !== 'all' ? `(${filterStatus})` : ''}</div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+        {[
+          { v: 'pending',   l: `⏳ Pendentes (${counts.pending})`,   },
+          { v: 'approved',  l: `✅ Aprovados (${counts.approved})`,  },
+          { v: 'rejected',  l: `❌ Rejeitados (${counts.rejected})`, },
+          { v: 'cancelled', l: `🚫 Cancelados (${counts.cancelled})`,},
+          { v: 'all',       l: `Todos (${counts.all})`,              },
+        ].map(t => (
+          <button key={t.v}
+            className={'btn bsm ' + (filterStatus === t.v ? 'bb' : 'bo')}
+            onClick={() => setFilterStatus(t.v)}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 40, textAlign: 'center', color: 'var(--mist)' }}><span className="spinner"></span> Carregando...</div>
+      ) : filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="card" s={48} /></div>
+          <div className="estit">{orders.length === 0 ? 'Nenhum pedido recebido' : 'Nenhum pedido com este filtro'}</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))' }}>
+          {filtered.map(o => (
+            <div key={o.id} className="card" style={{ borderTop: `4px solid ${o.status === 'pending' ? '#f59e0b' : o.status === 'approved' ? '#10b981' : o.status === 'rejected' ? '#ef4444' : '#9ca3af'}`, cursor: 'pointer' }} onClick={() => setDetail({ order: o, buyerName: buyerNames[o.buyer_company_id] })}>
+              <div className="cb">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  {statusBadge(o.status)}
+                  <span style={{ fontSize: 11, color: 'var(--mist)' }}>{fmtDate(o.created_at)}</span>
+                </div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, marginBottom: 4 }}>🏭 {buyerNames[o.buyer_company_id] || '...'}</div>
+                {o.total_usd > 0 && <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--sap7)' }}>{money(o.total_usd, 'USD')}</div>}
+                {o.total_brl > 0 && <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--sap7)' }}>{money(o.total_brl, 'BRL')}</div>}
+                {o.payment_method_name && <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 4 }}>💳 {o.payment_method_name}</div>}
+                {o.status === 'pending' && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: '#854d0e', fontWeight: 600 }}>👆 Clique para aprovar/rejeitar</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {detail && (
+        <PurchaseOrderDetailModal
+          item={detail}
+          isQuarrySide={true}
+          profile={profile}
+          toast={toast}
+          onAction={async () => { await load(); onChange && onChange() }}
+          onClose={() => setDetail(null)}
+        />
+      )}
+    </div>
+  )
+}
+
 function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
   const purchases = buyerData?.purchases || []
   const visits = buyerData?.visits || []
@@ -10008,6 +10443,7 @@ export default function App() {
       { p: 'ind_quarry_catalog',    l: 'Catálogo da Pedreira', i: 'cube' },
       { p: 'ind_catalog',           l: 'Catálogo Interno',    i: 'cube' },
       { p: 'ind_visits',            l: 'Inspeções',           i: 'check' },
+      { p: 'ind_orders',            l: 'Meus Pedidos',         i: 'card' },
       { p: 'ind_purchases',         l: 'Compras',             i: 'card' },
       { p: 'ind_bought_blocks',     l: 'Blocos Comprados',    i: 'cube' },
       { p: 'ind_external_quarries', l: 'Pedreiras',           i: 'mtn' },
@@ -10025,6 +10461,7 @@ export default function App() {
       { p: 'dashboard',   l: 'Dashboard',         i: 'grid' },
       { p: 'blocks',      l: 'Blocos',            i: 'cube' },
       { p: 'reserve',     l: 'Reserva Comercial', i: 'cube' },
+      { p: 'purchase_orders', l: 'Pedido de Compra', i: 'card' },
       { p: 'sales',       l: 'Vendas',            i: 'cart' },
       { p: 'sold_blocks', l: 'Blocos Vendidos',   i: 'check' },
       { p: 'releases',    l: 'Liberar Catálogo',  i: 'check' },
@@ -10045,6 +10482,7 @@ export default function App() {
       { p: 'dashboard',   l: 'Dashboard',         i: 'grid' },
       { p: 'blocks',      l: 'Blocos',            i: 'cube' },
       { p: 'reserve',     l: 'Reserva Comercial', i: 'cube' },
+      { p: 'purchase_orders', l: 'Pedido de Compra', i: 'card' },
       { p: 'sales',       l: 'Minhas Vendas',     i: 'cart' },
       { p: 'sold_blocks', l: 'Blocos Vendidos',   i: 'check' },
       { p: 'releases',    l: 'Liberar Catálogo',  i: 'check' },
@@ -10075,11 +10513,13 @@ export default function App() {
       case 'ind_visit_detail':      return <IndVisitDetailPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} visitId={selectedVisitId} setPage={setPage} />
       case 'ind_quarry_catalog':    return <IndQuarryCatalogPage profile={profile} buyerData={buyerData} toast={showToast} />
       case 'ind_catalog':           return <IndCatalogPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
+      case 'ind_orders':            return <IndOrdersPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'ind_bought_blocks':     return <IndBoughtBlocksPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'ind_purchases':         return <IndPurchasesPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'dashboard':   return <Dashboard blocks={blocks} quarries={quarries} clients={clients} sales={sales} />
       case 'blocks':      return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
       case 'sales':       return <SalesPage profile={profile} sales={sales} blocks={blocks} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
+      case 'purchase_orders': return <QuarryPurchaseOrdersPage profile={profile} onChange={() => loadData(profile)} toast={showToast} />
       case 'sold_blocks': return <SoldBlocksPage profile={profile} blocks={blocks} quarries={quarries} sales={sales} onChange={() => loadData(profile)} toast={showToast} />
       case 'releases':    return <ReleasesPage profile={profile} blocks={blocks} clients={clients} releases={releases} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
       case 'reserve':     return <ReserveCommercialPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
