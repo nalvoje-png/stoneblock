@@ -5405,6 +5405,7 @@ function IndInspectionFormModal({ profile, block, existingInspection, inspection
   const [form, setForm] = useState({
     notes: existingInspection?.notes || '',
     negotiated_value: existingInspection?.negotiated_value || '',
+    negotiated_price_m3: existingInspection?.negotiated_price_m3 || (existingInspection?.negotiated_value && existingInspection?.negotiated_net_volume ? (Number(existingInspection.negotiated_value) / Number(existingInspection.negotiated_net_volume)).toFixed(2) : ''),
     negotiated_currency: existingInspection?.negotiated_currency || block.currency || 'USD',
     // Medidas brutas
     negotiated_gross_l: existingInspection?.negotiated_gross_l || '',
@@ -5442,12 +5443,18 @@ function IndInspectionFormModal({ profile, block, existingInspection, inspection
   const save = async () => {
     setSaving(true)
     try {
+      // Calcula o valor total: preço m³ × volume líquido negociado (ou volume original do bloco)
+      const priceM3 = form.negotiated_price_m3 ? parseFloat(form.negotiated_price_m3) : null
+      const volumeForTotal = negotiatedNetVolume || parseFloat(block.net_volume) || 0
+      const totalValue = (priceM3 && volumeForTotal > 0) ? (priceM3 * volumeForTotal) : null
+
       const payload = {
         original_block_id: block.id,
         inspection_id: inspectionId || existingInspection?.inspection_id || null,
         photos,
         notes: form.notes.trim() || null,
-        negotiated_value: form.negotiated_value ? parseFloat(form.negotiated_value) : null,
+        negotiated_value: totalValue,
+        negotiated_price_m3: priceM3,
         negotiated_currency: form.negotiated_currency,
         negotiated_gross_l: form.negotiated_gross_l ? parseFloat(form.negotiated_gross_l) : null,
         negotiated_gross_h: form.negotiated_gross_h ? parseFloat(form.negotiated_gross_h) : null,
@@ -5576,15 +5583,32 @@ function IndInspectionFormModal({ profile, block, existingInspection, inspection
 
               <div style={{ background: 'var(--sap1)', padding: 12, borderRadius: 8, marginBottom: 10 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--sap7)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-                  💰 Valor negociado
+                  💰 Preço negociado
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 8 }}>
                   <select className="fc" value={form.negotiated_currency} onChange={e => setForm({ ...form, negotiated_currency: e.target.value })}>
                     <option value="USD">USD (US$)</option>
                     <option value="BRL">BRL (R$)</option>
                   </select>
-                  <input className="fc" type="number" step="0.01" value={form.negotiated_value} onChange={e => setForm({ ...form, negotiated_value: e.target.value })} placeholder="1800.00" />
+                  <div>
+                    <input className="fc" type="number" step="0.01" value={form.negotiated_price_m3} onChange={e => setForm({ ...form, negotiated_price_m3: e.target.value })} placeholder="Preço por m³" />
+                    <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 3 }}>Valor por m³</div>
+                  </div>
                 </div>
+                {/* Total calculado */}
+                {(() => {
+                  const m3 = parseFloat(form.negotiated_price_m3) || 0
+                  const vol = negotiatedNetVolume || parseFloat(block.net_volume) || 0
+                  const total = m3 * vol
+                  return (
+                    <div style={{ marginTop: 8, padding: 8, background: '#fff', borderRadius: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 12, color: 'var(--mist)' }}>Total do bloco ({vol.toFixed(2)} m³):</span>
+                      <span style={{ fontFamily: 'Sora,sans-serif', fontWeight: 800, fontSize: 16, color: 'var(--sap7)' }}>
+                        {total > 0 ? money(total, form.negotiated_currency) : '—'}
+                      </span>
+                    </div>
+                  )
+                })()}
               </div>
 
               {/* Medidas brutas negociadas */}

@@ -1474,6 +1474,7 @@ export async function createInspection(profile, payload) {
       photos: payload.photos || [],
       notes: payload.notes || null,
       negotiated_value: payload.negotiated_value || null,
+      negotiated_price_m3: payload.negotiated_price_m3 || null,
       negotiated_currency: payload.negotiated_currency || 'USD',
       negotiated_gross_l: payload.negotiated_gross_l || null,
       negotiated_gross_h: payload.negotiated_gross_h || null,
@@ -2349,11 +2350,19 @@ export async function sendPurchaseOrder(profile, visitId, payload) {
   }
   const quarryCompanyId = blocks[0].company_id
 
-  // 3. Calcula totais
+  // 3. Calcula totais (prioriza preço por m³)
   let totalBRL = 0, totalUSD = 0
   for (const i of insps) {
     const orig = blocks.find(b => b.id === i.original_block_id)
-    const val = Number(i.negotiated_value) || Number(orig?.total_value) || 0
+    const nVol = i.negotiated_net_volume || orig?.net_volume || 0
+    let val
+    if (i.negotiated_price_m3 && nVol > 0) {
+      val = Number(i.negotiated_price_m3) * nVol
+    } else if (i.negotiated_value) {
+      val = Number(i.negotiated_value)
+    } else {
+      val = Number(orig?.total_value) || 0
+    }
     const cur = i.negotiated_currency || orig?.currency || 'USD'
     if (cur === 'USD') totalUSD += val
     else totalBRL += val
@@ -2389,9 +2398,21 @@ export async function sendPurchaseOrder(profile, visitId, payload) {
     const nH = i.negotiated_h || orig?.net_h
     const nW = i.negotiated_w || orig?.net_w
     const nVol = i.negotiated_net_volume || orig?.net_volume
-    const val = Number(i.negotiated_value) || Number(orig?.total_value) || 0
     const cur = i.negotiated_currency || orig?.currency || 'USD'
-    const m3 = nVol > 0 ? val / nVol : null
+
+    // Cálculo do valor: prioridade ao preço por m³ negociado
+    let val, m3
+    if (i.negotiated_price_m3 && nVol > 0) {
+      m3 = Number(i.negotiated_price_m3)
+      val = m3 * nVol
+    } else if (i.negotiated_value) {
+      val = Number(i.negotiated_value)
+      m3 = nVol > 0 ? val / nVol : null
+    } else {
+      val = Number(orig?.total_value) || 0
+      m3 = Number(orig?.price_m3) || (nVol > 0 ? val / nVol : null)
+    }
+
     return {
       purchase_order_id: order.id,
       block_id: orig?.id,
