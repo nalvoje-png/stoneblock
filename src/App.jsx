@@ -8258,24 +8258,43 @@ function IndQuarryCatalogPage({ profile, buyerData, toast }) {
   const [search, setSearch] = useState('')
   const [filterMaterial, setFilterMaterial] = useState('')
   const [detail, setDetail] = useState(null)
-  const [addBlockToVisit, setAddBlockToVisit] = useState(null) // { block, visits }
+  // Fluxo de adicionar: 1) ActionChoice -> 2) AddToVisit
+  const [actionChoice, setActionChoice] = useState(null) // { block }
+  const [addBlockToVisit, setAddBlockToVisit] = useState(null) // { block, visits, acceptOriginal }
   const [adding, setAdding] = useState(false)
+  // Mapa de blocos já em inspeções abertas: { block_id: inspection_id }
+  const [addedMap, setAddedMap] = useState({})
 
   const reloadCatalog = async () => {
     setLoading(true)
     try {
       const data = await api.listIndQuarryCatalog(profile)
       setBlocks(data || [])
+      // Recarrega mapa de adicionados
+      const added = await api.listBlockIdsInOpenInspections(profile)
+      const m = {}
+      for (const a of added) m[a.block_id] = a.inspection_id
+      setAddedMap(m)
     } catch (e) { toast('Erro ao carregar catálogo: ' + e.message, 'err') }
     finally { setLoading(false) }
   }
 
   useEffect(() => { reloadCatalog() }, [])
 
-  const openAddToVisit = async (block) => {
+  // PASSO 1: pergunta "aceitar dados da pedreira" OU "iniciar inspeção"
+  const openActionChoice = (block) => {
+    if (addedMap[block.id]) return // já adicionado, não permite re-adicionar
+    setActionChoice({ block })
+  }
+
+  // PASSO 2: depois de escolher a forma, abre a seleção de inspeção (existente ou nova)
+  const proceedWithChoice = async (acceptOriginal) => {
+    if (!actionChoice) return
+    const block = actionChoice.block
+    setActionChoice(null)
     try {
       const visits = await api.listOpenVisitsForQuarry(profile, block.company_id)
-      setAddBlockToVisit({ block, visits })
+      setAddBlockToVisit({ block, visits, acceptOriginal })
     } catch (e) {
       toast('Erro: ' + e.message, 'err')
     }
@@ -8285,9 +8304,12 @@ function IndQuarryCatalogPage({ profile, buyerData, toast }) {
     if (!addBlockToVisit) return
     setAdding(true)
     try {
-      await api.addCatalogBlockToVisit(profile, addBlockToVisit.block, visitId)
-      toast('✓ Bloco adicionado à inspeção!', 'ok')
+      await api.addCatalogBlockToVisit(profile, addBlockToVisit.block, visitId, { acceptOriginal: addBlockToVisit.acceptOriginal })
+      toast(addBlockToVisit.acceptOriginal
+        ? '✓ Bloco adicionado com os dados da pedreira!'
+        : '✓ Bloco adicionado! Clique no bloco na inspeção para preencher seus dados.', 'ok')
       setAddBlockToVisit(null)
+      reloadCatalog()
     } catch (e) {
       toast('Erro: ' + e.message, 'err')
     } finally { setAdding(false) }
@@ -8297,9 +8319,12 @@ function IndQuarryCatalogPage({ profile, buyerData, toast }) {
     if (!addBlockToVisit) return
     setAdding(true)
     try {
-      await api.quickCreateVisitWithBlock(profile, addBlockToVisit.block)
-      toast('✓ Inspeção criada e bloco adicionado!', 'ok')
+      await api.quickCreateVisitWithBlock(profile, addBlockToVisit.block, { acceptOriginal: addBlockToVisit.acceptOriginal })
+      toast(addBlockToVisit.acceptOriginal
+        ? '✓ Inspeção criada com os dados da pedreira!'
+        : '✓ Inspeção criada! Clique no bloco na inspeção para preencher seus dados.', 'ok')
       setAddBlockToVisit(null)
+      reloadCatalog()
     } catch (e) {
       toast('Erro: ' + e.message, 'err')
     } finally { setAdding(false) }
@@ -8388,9 +8413,15 @@ function IndQuarryCatalogPage({ profile, buyerData, toast }) {
                 </div>
               </div>
               <div style={{ padding: '0 14px 14px' }}>
-                <button className="btn bb bsm" style={{ width: '100%' }} onClick={() => openAddToVisit(b)}>
-                  + Adicionar à Inspeção
-                </button>
+                {addedMap[b.id] ? (
+                  <div style={{ width: '100%', padding: '8px 12px', background: '#dcfce7', color: '#15803d', borderRadius: 6, fontSize: 12, fontWeight: 700, textAlign: 'center' }}>
+                    ✓ Adicionado à inspeção
+                  </div>
+                ) : (
+                  <button className="btn bb bsm" style={{ width: '100%' }} onClick={() => openActionChoice(b)}>
+                    + Adicionar à Inspeção
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -8399,6 +8430,64 @@ function IndQuarryCatalogPage({ profile, buyerData, toast }) {
 
       {detail && (
         <BlockDetailModal block={detail} quarry={null} onClose={() => setDetail(null)} />
+      )}
+
+      {/* Modal PASSO 1: aceitar dados originais ou iniciar inspeção */}
+      {actionChoice && (
+        <div className="mo" onClick={() => setActionChoice(null)}>
+          <div className="md" style={{ maxWidth: 540 }} onClick={e => e.stopPropagation()}>
+            <div className="mhead">
+              <div>
+                <div className="mtit">📍 Como adicionar este bloco?</div>
+                <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>
+                  Bloco {actionChoice.block.code} — {actionChoice.block.material}
+                </div>
+              </div>
+              <button className="btn bo bsm" onClick={() => setActionChoice(null)}><Icon n="x" s={14} /></button>
+            </div>
+            <div className="mbody">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+                <button
+                  onClick={() => proceedWithChoice(true)}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left',
+                    padding: 16, borderRadius: 10,
+                    background: '#dcfce7', border: '2px solid #15803d',
+                    cursor: 'pointer'
+                  }}>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, color: '#15803d', marginBottom: 6 }}>
+                    📋 Aceitar dados da pedreira
+                  </div>
+                  <div style={{ fontSize: 12, color: '#166534', lineHeight: 1.5 }}>
+                    Usa as fotos, medidas e o valor que a pedreira informou. 
+                    Você ainda pode editar tudo depois clicando no bloco dentro da inspeção.
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => proceedWithChoice(false)}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left',
+                    padding: 16, borderRadius: 10,
+                    background: 'var(--sap1)', border: '2px solid var(--sap6)',
+                    cursor: 'pointer'
+                  }}>
+                  <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--sap7)', marginBottom: 6 }}>
+                    ✏️ Iniciar inspeção
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--sap7)', lineHeight: 1.5 }}>
+                    O bloco é adicionado em branco. Você preenche fotos, medidas e preço m³ negociado.
+                  </div>
+                </button>
+
+              </div>
+            </div>
+            <div className="mfoot">
+              <button className="btn bo" onClick={() => setActionChoice(null)}>Cancelar</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Modal: selecionar inspeção pra adicionar bloco */}

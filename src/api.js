@@ -2276,6 +2276,9 @@ export async function listOpenVisitsForQuarry(profile, quarryCompanyId) {
 }
 
 // Cria inspeção rápida (sem pedreira externa específica) e adiciona o bloco
+// Cria inspeção a partir de um bloco do catálogo, criando uma visita nova
+// acceptOriginal: se true, aceita as informações da pedreira (copia fotos, medidas, valor)
+// se false, cria a inspeção vazia para o marcador preencher
 export async function quickCreateVisitWithBlock(profile, blockOriginal, options = {}) {
   if (!profile?.buyer_company_id) throw new Error('Sem indústria associada')
 
@@ -2296,30 +2299,75 @@ export async function quickCreateVisitWithBlock(profile, blockOriginal, options 
   if (visitError) throw visitError
 
   // Cria block_inspection vinculado
-  await createInspection(profile, {
+  const acceptOriginal = options.acceptOriginal !== false // default true
+  const photos = acceptOriginal && Array.isArray(blockOriginal.photos) ? blockOriginal.photos : []
+  const payload = {
     original_block_id: blockOriginal.id,
     inspection_id: visit.id,
-    photos: [],
+    photos,
     notes: null,
-    negotiated_value: blockOriginal.total_value || null,
     negotiated_currency: blockOriginal.currency || 'USD',
-  })
+  }
+  if (acceptOriginal) {
+    // Copia todas as medidas e valores
+    payload.negotiated_value = blockOriginal.total_value || null
+    payload.negotiated_price_m3 = blockOriginal.price_m3 || null
+    payload.negotiated_gross_l = blockOriginal.gross_l || null
+    payload.negotiated_gross_h = blockOriginal.gross_h || null
+    payload.negotiated_gross_w = blockOriginal.gross_w || null
+    payload.negotiated_l = blockOriginal.net_l || null
+    payload.negotiated_h = blockOriginal.net_h || null
+    payload.negotiated_w = blockOriginal.net_w || null
+  }
+  await createInspection(profile, payload)
 
   return visit
 }
 
 // Adiciona bloco do catálogo a uma inspeção já aberta
-export async function addCatalogBlockToVisit(profile, blockOriginal, visitId) {
+// acceptOriginal: mesmo significado da função acima
+export async function addCatalogBlockToVisit(profile, blockOriginal, visitId, options = {}) {
   if (!profile?.buyer_company_id) throw new Error('Sem indústria associada')
 
-  return await createInspection(profile, {
+  const acceptOriginal = options.acceptOriginal !== false // default true
+  const photos = acceptOriginal && Array.isArray(blockOriginal.photos) ? blockOriginal.photos : []
+  const payload = {
     original_block_id: blockOriginal.id,
     inspection_id: visitId,
-    photos: [],
+    photos,
     notes: null,
-    negotiated_value: blockOriginal.total_value || null,
     negotiated_currency: blockOriginal.currency || 'USD',
-  })
+  }
+  if (acceptOriginal) {
+    payload.negotiated_value = blockOriginal.total_value || null
+    payload.negotiated_price_m3 = blockOriginal.price_m3 || null
+    payload.negotiated_gross_l = blockOriginal.gross_l || null
+    payload.negotiated_gross_h = blockOriginal.gross_h || null
+    payload.negotiated_gross_w = blockOriginal.gross_w || null
+    payload.negotiated_l = blockOriginal.net_l || null
+    payload.negotiated_h = blockOriginal.net_h || null
+    payload.negotiated_w = blockOriginal.net_w || null
+  }
+  return await createInspection(profile, payload)
+}
+
+// Lista os IDs dos blocos originais que já estão em alguma inspeção ABERTA da indústria
+// (usado pra mostrar badge "Adicionado à inspeção" no catálogo)
+export async function listBlockIdsInOpenInspections(profile) {
+  if (!profile?.buyer_company_id) return []
+  // Pega inspeções abertas (não finalizadas/aprovadas/rejeitadas)
+  const { data: visits } = await supabase
+    .from('inspections')
+    .select('id')
+    .eq('buyer_company_id', profile.buyer_company_id)
+    .or('status.eq.open,order_status.eq.awaiting,order_status.eq.rejected')
+  if (!visits || visits.length === 0) return []
+  const visitIds = visits.map(v => v.id)
+  const { data: insps } = await supabase
+    .from('block_inspections')
+    .select('original_block_id, inspection_id')
+    .in('inspection_id', visitIds)
+  return (insps || []).map(i => ({ block_id: i.original_block_id, inspection_id: i.inspection_id }))
 }
 
 // ═══════════════════════════════════════════════════════════════
