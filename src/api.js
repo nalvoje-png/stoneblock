@@ -2818,13 +2818,15 @@ export async function approvePurchaseOrder(profile, orderId) {
 // Busca pedreiras (pra indústria fazer solicitação)
 // Filtra por nome, CNPJ ou material disponível em estoque
 export async function searchQuarries(searchTerm) {
+  console.log('[searchQuarries] term:', searchTerm)
+
   if (!searchTerm || searchTerm.length < 2) {
-    // Retorna lista de todas as pedreiras (owners)
     const { data, error } = await supabase
       .from('profiles')
       .select('id, name, doc_number, email')
       .eq('role', 'owner')
       .order('name')
+    console.log('[searchQuarries] sem termo - profiles:', data?.length || 0, 'error:', error)
     if (error) return []
     return data || []
   }
@@ -2832,28 +2834,33 @@ export async function searchQuarries(searchTerm) {
   const term = searchTerm.toLowerCase()
 
   // 1. Busca por nome ou CNPJ
-  const { data: profiles } = await supabase
+  const { data: profiles, error: pErr } = await supabase
     .from('profiles')
     .select('id, name, doc_number, email')
     .eq('role', 'owner')
     .or(`name.ilike.%${term}%,doc_number.ilike.%${term}%`)
+  console.log('[searchQuarries] por nome/CNPJ:', profiles?.length || 0, 'error:', pErr)
 
   // 2. Busca por material (em blocks)
-  const { data: blocksWithMaterial } = await supabase
+  const { data: blocksWithMaterial, error: bErr } = await supabase
     .from('blocks')
     .select('company_id, material')
     .ilike('material', `%${term}%`)
     .in('status', ['available', 'produced', 'reserve'])
+  console.log('[searchQuarries] blocos com material:', blocksWithMaterial?.length || 0, 'error:', bErr)
 
   // IDs únicos das pedreiras que têm esse material
   const quarryIdsByMaterial = [...new Set((blocksWithMaterial || []).map(b => b.company_id))]
+  console.log('[searchQuarries] quarry IDs por material:', quarryIdsByMaterial)
+  
   let profilesByMaterial = []
   if (quarryIdsByMaterial.length > 0) {
-    const { data } = await supabase
+    const { data, error: pmErr } = await supabase
       .from('profiles')
       .select('id, name, doc_number, email')
       .in('id', quarryIdsByMaterial)
       .eq('role', 'owner')
+    console.log('[searchQuarries] profiles por material:', data?.length || 0, 'error:', pmErr)
     profilesByMaterial = data || []
   }
 
@@ -2865,6 +2872,7 @@ export async function searchQuarries(searchTerm) {
     seen.add(p.id)
     merged.push(p)
   }
+  console.log('[searchQuarries] resultado final:', merged.length, merged)
   return merged
 }
 
