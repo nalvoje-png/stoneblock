@@ -8918,7 +8918,7 @@ function NewCatalogRequestModal({ profile, onClose, onSent, toast }) {
         <div className="mbody">
           {/* Busca */}
           <div className="fg">
-            <label className="fl">Buscar pedreiras (por nome, CNPJ ou material)</label>
+            <label className="fl">Buscar pedreiras (por nome ou material)</label>
             <div style={{ display: 'flex', gap: 6 }}>
               <input className="fc" value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Ex: granito branco, VMC, Ocean Fantasy..."
@@ -8948,7 +8948,7 @@ function NewCatalogRequestModal({ profile, onClose, onSent, toast }) {
                     <input type="checkbox" checked={selected.has(q.id)} readOnly />
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700 }}>{q.name}</div>
-                      {q.doc_number && <div style={{ fontSize: 11, color: 'var(--mist)' }}>{q.doc_number}</div>}
+                      {q.email && <div style={{ fontSize: 11, color: 'var(--mist)' }}>{q.email}</div>}
                     </div>
                   </div>
                 ))}
@@ -9372,7 +9372,7 @@ function OfferCatalogModal({ profile, blocks, onClose, onSent, toast }) {
           <div className="fg">
             <label className="fl">Indústrias destinatárias</label>
             <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-              <input className="fc" value={buyerSearch} onChange={e => setBuyerSearch(e.target.value)} placeholder="🔍 Buscar por nome ou CNPJ" onKeyDown={e => e.key === 'Enter' && searchBuyers()} />
+              <input className="fc" value={buyerSearch} onChange={e => setBuyerSearch(e.target.value)} placeholder="🔍 Buscar por nome" onKeyDown={e => e.key === 'Enter' && searchBuyers()} />
               <button className="btn bo bsm" onClick={searchBuyers} disabled={loading}>Buscar</button>
             </div>
             <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--fog)', borderRadius: 8 }}>
@@ -9385,7 +9385,7 @@ function OfferCatalogModal({ profile, blocks, onClose, onSent, toast }) {
                   <input type="checkbox" checked={selectedBuyers.has(b.id)} readOnly />
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700 }}>{b.name}</div>
-                    {b.doc_number && <div style={{ fontSize: 11, color: 'var(--mist)' }}>{b.doc_number}</div>}
+                    {(b.doc_number || b.cnpj || b.contact_email) && <div style={{ fontSize: 11, color: 'var(--mist)' }}>{b.doc_number || b.cnpj || b.contact_email}</div>}
                   </div>
                 </div>
               ))}

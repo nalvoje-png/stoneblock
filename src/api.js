@@ -2816,14 +2816,14 @@ export async function approvePurchaseOrder(profile, orderId) {
 // ═══════════════════════════════════════════════════════════════
 
 // Busca pedreiras (pra indústria fazer solicitação)
-// Filtra por nome, CNPJ ou material disponível em estoque
+// Filtra por nome ou material disponível em estoque
 export async function searchQuarries(searchTerm) {
   console.log('[searchQuarries] term:', searchTerm)
 
   if (!searchTerm || searchTerm.length < 2) {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, name, doc_number, email')
+      .select('id, name, email')
       .eq('role', 'owner')
       .order('name')
     console.log('[searchQuarries] sem termo - profiles:', data?.length || 0, 'error:', error)
@@ -2833,13 +2833,13 @@ export async function searchQuarries(searchTerm) {
 
   const term = searchTerm.toLowerCase()
 
-  // 1. Busca por nome ou CNPJ
+  // 1. Busca por nome (CNPJ não existe na tabela profiles)
   const { data: profiles, error: pErr } = await supabase
     .from('profiles')
-    .select('id, name, doc_number, email')
+    .select('id, name, email')
     .eq('role', 'owner')
-    .or(`name.ilike.%${term}%,doc_number.ilike.%${term}%`)
-  console.log('[searchQuarries] por nome/CNPJ:', profiles?.length || 0, 'error:', pErr)
+    .ilike('name', `%${term}%`)
+  console.log('[searchQuarries] por nome:', profiles?.length || 0, 'error:', pErr)
 
   // 2. Busca por material (em blocks)
   const { data: blocksWithMaterial, error: bErr } = await supabase
@@ -2857,7 +2857,7 @@ export async function searchQuarries(searchTerm) {
   if (quarryIdsByMaterial.length > 0) {
     const { data, error: pmErr } = await supabase
       .from('profiles')
-      .select('id, name, doc_number, email')
+      .select('id, name, email')
       .in('id', quarryIdsByMaterial)
       .eq('role', 'owner')
     console.log('[searchQuarries] profiles por material:', data?.length || 0, 'error:', pmErr)
@@ -2881,10 +2881,13 @@ export async function searchBuyerCompanies(searchTerm) {
   let query = supabase.from('buyer_companies').select('*').order('name')
   if (searchTerm && searchTerm.length >= 2) {
     const term = searchTerm.toLowerCase()
-    query = query.or(`name.ilike.%${term}%,doc_number.ilike.%${term}%`)
+    query = query.ilike('name', `%${term}%`)
   }
   const { data, error } = await query
-  if (error) return []
+  if (error) {
+    console.warn('[searchBuyerCompanies] erro:', error)
+    return []
+  }
   return data || []
 }
 
