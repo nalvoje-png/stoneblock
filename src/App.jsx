@@ -8372,6 +8372,19 @@ function IndQuarryCatalogPage({ profile, buyerData, toast }) {
                   <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--sap7)' }}>
                     {money(b.total_value, b.currency)}
                   </div>
+                  {/* Prazo restante (se for oferta com validade) */}
+                  {b.release_valid_until && (() => {
+                    const ms = new Date(b.release_valid_until) - new Date()
+                    if (ms <= 0) return null
+                    const days = Math.floor(ms / (1000 * 60 * 60 * 24))
+                    const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+                    const urgent = days < 1
+                    return (
+                      <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: urgent ? '#dc2626' : '#854d0e', background: urgent ? '#fee2e2' : '#fef3c7', padding: '3px 8px', borderRadius: 4, display: 'inline-block' }}>
+                        ⏰ {days > 0 ? `Expira em ${days}d` : `Expira em ${hours}h`}
+                      </div>
+                    )
+                  })()}
                 </div>
               </div>
               <div style={{ padding: '0 14px 14px' }}>
@@ -8698,6 +8711,741 @@ function FinalizeInspectionPurchaseModal({ profile, buyerData, visit, onClose, o
 // ═══════════════════════════════════════════════════════════════
 // IND ORDERS — meus pedidos de compra (indústria)
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// IND CATALOG REQUESTS — solicitações de catálogo (indústria)
+// ═══════════════════════════════════════════════════════════════
+function IndCatalogRequestsPage({ profile, buyerData, onChange, toast }) {
+  const requests = buyerData?.catalogRequests || []
+  const [showNew, setShowNew] = useState(false)
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [detail, setDetail] = useState(null)
+  const [quarryNames, setQuarryNames] = useState({})
+
+  // Carrega nomes das pedreiras envolvidas
+  useEffect(() => {
+    if (requests.length === 0) return
+    const ids = [...new Set(requests.map(r => r.quarry_company_id))]
+    ;(async () => {
+      const { data } = await supabase.from('profiles').select('id, name').in('id', ids)
+      const m = {}
+      for (const p of (data || [])) m[p.id] = p.name
+      setQuarryNames(m)
+    })()
+  }, [requests.length])
+
+  const filtered = requests.filter(r => filterStatus === 'all' || r.status === filterStatus)
+  const counts = {
+    all: requests.length,
+    pending: requests.filter(r => r.status === 'pending').length,
+    answered: requests.filter(r => r.status === 'answered').length,
+    cancelled: requests.filter(r => r.status === 'cancelled').length,
+  }
+
+  // Agrupa por group_id (uma solicitação enviada pra várias pedreiras)
+  const groups = {}
+  for (const r of filtered) {
+    const k = r.group_id || r.id
+    if (!groups[k]) groups[k] = []
+    groups[k].push(r)
+  }
+  const groupList = Object.entries(groups).sort(([, a], [, b]) =>
+    new Date(b[0].created_at) - new Date(a[0].created_at)
+  )
+
+  const cancel = async (r) => {
+    if (!confirm('Cancelar esta solicitação?')) return
+    try {
+      await api.cancelCatalogRequest(profile, r.id)
+      toast('Solicitação cancelada.', 'ok')
+      onChange && onChange()
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+  }
+
+  const statusBadge = (s) => {
+    if (s === 'pending') return <span className="bdg" style={{ background: '#fef3c7', color: '#854d0e' }}>⏳ Aguardando</span>
+    if (s === 'answered') return <span className="bdg" style={{ background: '#dcfce7', color: '#15803d' }}>✅ Respondida</span>
+    if (s === 'cancelled') return <span className="bdg" style={{ background: '#f3f4f6', color: '#6b7280' }}>🚫 Cancelada</span>
+    return null
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="ptit">📨 Solicitações</div>
+            <div className="psub">{groupList.length} solicitação(ões) {filterStatus !== 'all' ? `(${filterStatus})` : ''}</div>
+          </div>
+          <button className="btn bb" onClick={() => setShowNew(true)}>
+            <Icon n="plus" s={16} c="#fff" /> Nova Solicitação
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+        {[
+          { v: 'all',       l: `Todas (${counts.all})` },
+          { v: 'pending',   l: `⏳ Aguardando (${counts.pending})` },
+          { v: 'answered',  l: `✅ Respondidas (${counts.answered})` },
+          { v: 'cancelled', l: `🚫 Canceladas (${counts.cancelled})` },
+        ].map(t => (
+          <button key={t.v}
+            className={'btn bsm ' + (filterStatus === t.v ? 'bb' : 'bo')}
+            onClick={() => setFilterStatus(t.v)}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      {groupList.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="check" s={48} /></div>
+          <div className="estit">{requests.length === 0 ? 'Nenhuma solicitação enviada' : 'Nenhuma com este filtro'}</div>
+          {requests.length === 0 && (
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 8, maxWidth: 400, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.5 }}>
+              Envie uma solicitação às pedreiras pedindo blocos de material específico.
+              Elas podem responder liberando um catálogo temporário pra você.
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))' }}>
+          {groupList.map(([gid, items]) => {
+            const first = items[0]
+            return (
+              <div key={gid} className="card">
+                <div className="cb">
+                  <div style={{ fontSize: 12, color: 'var(--mist)', marginBottom: 6 }}>
+                    📅 {fmtDate(first.created_at)} · {items.length} pedreira(s)
+                  </div>
+                  <div style={{ fontSize: 13, marginBottom: 10, lineHeight: 1.5, padding: 8, background: 'var(--haze)', borderRadius: 6 }}>
+                    "{first.message}"
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {items.map(r => (
+                      <div key={r.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, fontSize: 12 }}>
+                        <span>📍 <strong>{quarryNames[r.quarry_company_id] || '...'}</strong></span>
+                        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                          {statusBadge(r.status)}
+                          <button className="btn bo bsm" style={{ padding: '4px 8px', fontSize: 11 }} onClick={() => setDetail({ request: r, quarryName: quarryNames[r.quarry_company_id] })}>
+                            Ver
+                          </button>
+                          {r.status === 'pending' && (
+                            <button className="btn bsm" style={{ background: '#fee2e2', color: '#991b1b', padding: '4px 8px', fontSize: 11 }} onClick={() => cancel(r)}>
+                              Cancelar
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {showNew && (
+        <NewCatalogRequestModal profile={profile} onClose={() => setShowNew(false)} onSent={() => { setShowNew(false); onChange && onChange() }} toast={toast} />
+      )}
+
+      {detail && (
+        <CatalogRequestDetailModal request={detail.request} quarryName={detail.quarryName} onClose={() => setDetail(null)} />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// NEW CATALOG REQUEST MODAL — indústria cria nova solicitação
+// ═══════════════════════════════════════════════════════════════
+function NewCatalogRequestModal({ profile, onClose, onSent, toast }) {
+  const [search, setSearch] = useState('')
+  const [results, setResults] = useState([])
+  const [selected, setSelected] = useState(new Set())
+  const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [searched, setSearched] = useState(false)
+
+  const doSearch = async () => {
+    setLoading(true)
+    setSearched(true)
+    try {
+      const data = await api.searchQuarries(search.trim())
+      setResults(data)
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => {
+    // Carrega lista inicial vazia
+    doSearch()
+  }, [])
+
+  const toggle = (id) => {
+    const ns = new Set(selected)
+    if (ns.has(id)) ns.delete(id); else ns.add(id)
+    setSelected(ns)
+  }
+
+  const send = async () => {
+    if (selected.size === 0) { toast('Selecione ao menos uma pedreira.', 'err'); return }
+    if (!message.trim()) { toast('Digite uma mensagem.', 'err'); return }
+    setSaving(true)
+    try {
+      await api.sendCatalogRequest(profile, Array.from(selected), message.trim())
+      toast(`✅ Solicitação enviada para ${selected.size} pedreira(s).`, 'ok')
+      onSent && onSent()
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div>
+            <div className="mtit">📨 Nova Solicitação</div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>
+              {selected.size} pedreira(s) selecionada(s)
+            </div>
+          </div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          {/* Busca */}
+          <div className="fg">
+            <label className="fl">Buscar pedreiras (por nome, CNPJ ou material)</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input className="fc" value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Ex: granito branco, VMC, Ocean Fantasy..."
+                onKeyDown={e => e.key === 'Enter' && doSearch()} />
+              <button className="btn bb" onClick={doSearch} disabled={loading}>
+                🔍 Buscar
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 4 }}>
+              Deixe em branco e clique Buscar pra ver todas as pedreiras
+            </div>
+          </div>
+
+          {/* Lista */}
+          <div className="fg">
+            <label className="fl">Pedreiras encontradas</label>
+            {loading ? (
+              <div style={{ padding: 20, textAlign: 'center', color: 'var(--mist)' }}><span className="spinner"></span> Buscando...</div>
+            ) : results.length === 0 ? (
+              <div style={{ padding: 20, textAlign: 'center', color: 'var(--mist)', fontSize: 13 }}>
+                {searched ? 'Nenhuma pedreira encontrada com este termo' : 'Use a busca para encontrar pedreiras'}
+              </div>
+            ) : (
+              <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid var(--fog)', borderRadius: 8 }}>
+                {results.map(q => (
+                  <div key={q.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, borderBottom: '1px solid var(--haze)', cursor: 'pointer', background: selected.has(q.id) ? 'var(--sap1)' : '#fff' }} onClick={() => toggle(q.id)}>
+                    <input type="checkbox" checked={selected.has(q.id)} readOnly />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700 }}>{q.name}</div>
+                      {q.doc_number && <div style={{ fontSize: 11, color: 'var(--mist)' }}>{q.doc_number}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Mensagem */}
+          <div className="fg">
+            <label className="fl">Mensagem *</label>
+            <textarea className="fc" rows={4} value={message} onChange={e => setMessage(e.target.value)}
+              placeholder="Ex: Preciso de 5 blocos Ocean Fantasy padrão grande para entrega em janeiro. Aguardo retorno." />
+            <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 4 }}>
+              Esta mensagem será enviada a cada pedreira selecionada. Cada uma recebe como exclusiva (não saberá das outras).
+            </div>
+          </div>
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose} disabled={saving}>Cancelar</button>
+          <button className="btn bb" onClick={send} disabled={saving || selected.size === 0 || !message.trim()}>
+            {saving ? <><span className="spinner"></span> Enviando</> : `📤 Enviar para ${selected.size} pedreira(s)`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CATALOG REQUEST DETAIL MODAL — visualização do que foi enviado
+// ═══════════════════════════════════════════════════════════════
+function CatalogRequestDetailModal({ request, quarryName, onClose }) {
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 600 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div>
+            <div className="mtit">📨 Solicitação</div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>📍 {quarryName || '—'} · {fmtDate(request.created_at)}</div>
+          </div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          <div className="fg">
+            <label className="fl">Sua mensagem</label>
+            <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8, fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+              {request.message}
+            </div>
+          </div>
+
+          {request.status === 'pending' && (
+            <div style={{ padding: 12, background: '#fef3c7', borderRadius: 8, color: '#854d0e', fontSize: 13 }}>
+              ⏳ Aguardando resposta da pedreira.
+            </div>
+          )}
+
+          {request.status === 'answered' && (
+            <>
+              <div className="fg">
+                <label className="fl">Resposta da pedreira</label>
+                <div style={{ background: '#dcfce7', padding: 12, borderRadius: 8, fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                  {request.reply_message || '(sem texto adicional)'}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 4 }}>
+                  Respondida em {fmtDate(request.replied_at)}
+                </div>
+              </div>
+              <div style={{ padding: 12, background: 'var(--sap1)', borderRadius: 8, color: 'var(--sap7)', fontSize: 13 }}>
+                💡 Os blocos liberados aparecem em "Catálogo da Pedreira".
+              </div>
+            </>
+          )}
+
+          {request.status === 'cancelled' && (
+            <div style={{ padding: 12, background: '#fee2e2', borderRadius: 8, color: '#991b1b', fontSize: 13 }}>
+              🚫 Solicitação cancelada.
+            </div>
+          )}
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose}>Fechar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// QUARRY CATALOG REQUESTS — solicitações recebidas (pedreira)
+// ═══════════════════════════════════════════════════════════════
+function QuarryCatalogRequestsPage({ profile, blocks, clients, onChange, toast }) {
+  const [requests, setRequests] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [filterStatus, setFilterStatus] = useState('pending')
+  const [reply, setReply] = useState(null)
+  const [buyerNames, setBuyerNames] = useState({})
+  const [showOffer, setShowOffer] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const data = await api.listCatalogRequestsForQuarry(profile)
+      setRequests(data)
+      const buyerIds = [...new Set(data.map(r => r.buyer_company_id))]
+      if (buyerIds.length > 0) {
+        const { data: bs } = await supabase
+          .from('buyer_companies').select('id, name').in('id', buyerIds)
+        const m = {}
+        for (const b of (bs || [])) m[b.id] = b.name
+        setBuyerNames(m)
+      }
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setLoading(false) }
+  }
+
+  useEffect(() => {
+    load()
+    const interval = setInterval(() => load().catch(() => {}), 15000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const filtered = requests.filter(r => filterStatus === 'all' || r.status === filterStatus)
+  const counts = {
+    all: requests.length,
+    pending: requests.filter(r => r.status === 'pending').length,
+    answered: requests.filter(r => r.status === 'answered').length,
+    cancelled: requests.filter(r => r.status === 'cancelled').length,
+  }
+
+  const statusBadge = (s) => {
+    if (s === 'pending') return <span className="bdg" style={{ background: '#fef3c7', color: '#854d0e' }}>⏳ Pendente</span>
+    if (s === 'answered') return <span className="bdg" style={{ background: '#dcfce7', color: '#15803d' }}>✅ Respondida</span>
+    if (s === 'cancelled') return <span className="bdg" style={{ background: '#f3f4f6', color: '#6b7280' }}>🚫 Cancelada</span>
+    return null
+  }
+
+  return (
+    <div>
+      <div className="ph">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="ptit">📨 Solicitações</div>
+            <div className="psub">{filtered.length} solicitação(ões) {filterStatus !== 'all' ? `(${filterStatus})` : ''}</div>
+          </div>
+          <button className="btn bb" onClick={() => setShowOffer(true)}>
+            <Icon n="plus" s={16} c="#fff" /> Ofertar Catálogo
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+        {[
+          { v: 'pending',   l: `⏳ Pendentes (${counts.pending})` },
+          { v: 'answered',  l: `✅ Respondidas (${counts.answered})` },
+          { v: 'cancelled', l: `🚫 Canceladas (${counts.cancelled})` },
+          { v: 'all',       l: `Todas (${counts.all})` },
+        ].map(t => (
+          <button key={t.v}
+            className={'btn bsm ' + (filterStatus === t.v ? 'bb' : 'bo')}
+            onClick={() => setFilterStatus(t.v)}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 40, textAlign: 'center', color: 'var(--mist)' }}><span className="spinner"></span> Carregando...</div>
+      ) : filtered.length === 0 ? (
+        <div className="es">
+          <div style={{ marginBottom: 12, opacity: .3 }}><Icon n="check" s={48} /></div>
+          <div className="estit">{requests.length === 0 ? 'Nenhuma solicitação recebida' : 'Nenhuma com este filtro'}</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))' }}>
+          {filtered.map(r => (
+            <div key={r.id} className="card" style={{ borderTop: `4px solid ${r.status === 'pending' ? '#f59e0b' : r.status === 'answered' ? '#10b981' : '#9ca3af'}` }}>
+              <div className="cb">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  {statusBadge(r.status)}
+                  <span style={{ fontSize: 11, color: 'var(--mist)' }}>{fmtDate(r.created_at)}</span>
+                </div>
+                <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 15, marginBottom: 8 }}>
+                  🏭 {buyerNames[r.buyer_company_id] || '...'}
+                </div>
+                <div style={{ fontSize: 13, padding: 8, background: 'var(--haze)', borderRadius: 6, lineHeight: 1.4, marginBottom: 10, whiteSpace: 'pre-wrap' }}>
+                  "{r.message}"
+                </div>
+                {r.status === 'pending' && (
+                  <button className="btn bb" style={{ width: '100%' }} onClick={() => setReply({ request: r, buyerName: buyerNames[r.buyer_company_id] })}>
+                    📤 Responder
+                  </button>
+                )}
+                {r.status === 'answered' && r.reply_message && (
+                  <div style={{ fontSize: 12, padding: 8, background: '#dcfce7', borderRadius: 6, color: '#15803d', whiteSpace: 'pre-wrap' }}>
+                    <strong>Sua resposta:</strong> {r.reply_message}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {reply && (
+        <ReplyCatalogRequestModal
+          profile={profile}
+          request={reply.request}
+          buyerName={reply.buyerName}
+          blocks={blocks}
+          onClose={() => setReply(null)}
+          onSent={async () => { setReply(null); await load(); onChange && onChange() }}
+          toast={toast}
+        />
+      )}
+
+      {showOffer && (
+        <OfferCatalogModal
+          profile={profile}
+          blocks={blocks}
+          onClose={() => setShowOffer(false)}
+          onSent={() => { setShowOffer(false); onChange && onChange() }}
+          toast={toast}
+        />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REPLY CATALOG REQUEST MODAL — pedreira responde uma solicitação
+// ═══════════════════════════════════════════════════════════════
+function ReplyCatalogRequestModal({ profile, request, buyerName, blocks, onClose, onSent, toast }) {
+  const [selected, setSelected] = useState(new Set())
+  const [validDays, setValidDays] = useState(7)
+  const [replyMessage, setReplyMessage] = useState('')
+  const [search, setSearch] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const availableBlocks = (blocks || []).filter(b => 
+    ['available', 'produced', 'reserve'].includes(b.status)
+  )
+
+  const filtered = availableBlocks.filter(b => {
+    if (!search) return true
+    const s = search.toLowerCase()
+    return (b.code || '').toLowerCase().includes(s) ||
+           (b.material || '').toLowerCase().includes(s)
+  })
+
+  const toggle = (id) => {
+    const ns = new Set(selected)
+    if (ns.has(id)) ns.delete(id); else ns.add(id)
+    setSelected(ns)
+  }
+
+  const send = async () => {
+    if (validDays < 1 || validDays > 15) {
+      toast('Prazo deve ser entre 1 e 15 dias.', 'err'); return
+    }
+    setSaving(true)
+    try {
+      await api.replyCatalogRequest(profile, request.id, Array.from(selected), validDays, replyMessage.trim() || null)
+      toast(`✅ Resposta enviada${selected.size > 0 ? ` com ${selected.size} bloco(s) liberado(s)` : ''}.`, 'ok')
+      onSent && onSent()
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 780 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div>
+            <div className="mtit">📤 Responder Solicitação</div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>
+              🏭 {buyerName || '—'} · {selected.size} bloco(s) selecionado(s)
+            </div>
+          </div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          {/* Mensagem original */}
+          <div className="fg">
+            <label className="fl">Mensagem da indústria</label>
+            <div style={{ background: 'var(--haze)', padding: 12, borderRadius: 8, fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+              "{request.message}"
+            </div>
+          </div>
+
+          {/* Sua resposta */}
+          <div className="fg">
+            <label className="fl">Sua mensagem de resposta (opcional)</label>
+            <textarea className="fc" rows={3} value={replyMessage} onChange={e => setReplyMessage(e.target.value)}
+              placeholder="Ex: Tenho 3 blocos que servem, vou liberar para você ver. Aceito proposta." />
+          </div>
+
+          {/* Seleção de blocos */}
+          <div className="fg">
+            <label className="fl">Blocos para liberar ({selected.size} de {availableBlocks.length} disponíveis)</label>
+            <input className="fc" style={{ marginBottom: 8 }} value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Buscar por código ou material" />
+            <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--fog)', borderRadius: 8 }}>
+              {filtered.length === 0 ? (
+                <div style={{ padding: 20, textAlign: 'center', color: 'var(--mist)', fontSize: 13 }}>Nenhum bloco encontrado</div>
+              ) : filtered.map(b => (
+                <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 8, borderBottom: '1px solid var(--haze)', cursor: 'pointer', background: selected.has(b.id) ? 'var(--sap1)' : '#fff' }} onClick={() => toggle(b.id)}>
+                  <input type="checkbox" checked={selected.has(b.id)} readOnly />
+                  <div style={{ flex: 1, fontSize: 13 }}>
+                    <strong>{b.code}</strong> · {b.material}
+                    {b.net_volume && <span style={{ color: 'var(--mist)', marginLeft: 6 }}>· {Number(b.net_volume).toFixed(2)} m³</span>}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--sap7)' }}>{money(b.total_value, b.currency)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Prazo */}
+          <div className="fg">
+            <label className="fl">Prazo de validade da liberação *</label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+              {[3, 7, 15].map(d => (
+                <button key={d}
+                  className={'btn bsm ' + (validDays === d ? 'bb' : 'bo')}
+                  onClick={() => setValidDays(d)}>
+                  {d} dias
+                </button>
+              ))}
+              <input className="fc" type="number" min="1" max="15" style={{ width: 100, fontSize: 13 }} value={validDays} onChange={e => setValidDays(parseInt(e.target.value) || 7)} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--mist)' }}>Máximo: 15 dias. Após o prazo, os blocos somem do catálogo da indústria.</div>
+          </div>
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose} disabled={saving}>Cancelar</button>
+          <button className="btn bb" onClick={send} disabled={saving}>
+            {saving ? <><span className="spinner"></span> Enviando</> : '📤 Enviar Resposta'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// OFFER CATALOG MODAL — pedreira oferta catálogo (sem solicitação)
+// ═══════════════════════════════════════════════════════════════
+function OfferCatalogModal({ profile, blocks, onClose, onSent, toast }) {
+  const [buyerSearch, setBuyerSearch] = useState('')
+  const [buyers, setBuyers] = useState([])
+  const [selectedBuyers, setSelectedBuyers] = useState(new Set())
+  const [selectedBlocks, setSelectedBlocks] = useState(new Set())
+  const [validDays, setValidDays] = useState(7)
+  const [message, setMessage] = useState('')
+  const [blockSearch, setBlockSearch] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const availableBlocks = (blocks || []).filter(b =>
+    ['available', 'produced', 'reserve'].includes(b.status)
+  )
+
+  const filteredBlocks = availableBlocks.filter(b => {
+    if (!blockSearch) return true
+    const s = blockSearch.toLowerCase()
+    return (b.code || '').toLowerCase().includes(s) ||
+           (b.material || '').toLowerCase().includes(s)
+  })
+
+  const searchBuyers = async () => {
+    setLoading(true)
+    try {
+      const data = await api.searchBuyerCompanies(buyerSearch.trim())
+      setBuyers(data)
+    } catch (e) { toast('Erro: ' + e.message, 'err') }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { searchBuyers() }, [])
+
+  const toggleBuyer = (id) => {
+    const ns = new Set(selectedBuyers)
+    if (ns.has(id)) ns.delete(id); else ns.add(id)
+    setSelectedBuyers(ns)
+  }
+  const toggleBlock = (id) => {
+    const ns = new Set(selectedBlocks)
+    if (ns.has(id)) ns.delete(id); else ns.add(id)
+    setSelectedBlocks(ns)
+  }
+
+  const send = async () => {
+    if (selectedBuyers.size === 0) { toast('Selecione ao menos uma indústria.', 'err'); return }
+    if (selectedBlocks.size === 0) { toast('Selecione ao menos um bloco.', 'err'); return }
+    if (validDays < 1 || validDays > 15) { toast('Prazo deve ser entre 1 e 15 dias.', 'err'); return }
+    setSaving(true)
+    try {
+      await api.offerCatalogToBuyers(profile, Array.from(selectedBuyers), Array.from(selectedBlocks), validDays, message.trim() || null)
+      toast(`✅ Catálogo ofertado para ${selectedBuyers.size} indústria(s).`, 'ok')
+      onSent && onSent()
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="mo" onClick={onClose}>
+      <div className="md" style={{ maxWidth: 820 }} onClick={e => e.stopPropagation()}>
+        <div className="mhead">
+          <div>
+            <div className="mtit">🎁 Ofertar Catálogo</div>
+            <div style={{ fontSize: 13, color: 'var(--mist)', marginTop: 4 }}>
+              {selectedBuyers.size} indústria(s) · {selectedBlocks.size} bloco(s) · {validDays} dia(s)
+            </div>
+          </div>
+          <button className="btn bo bsm" onClick={onClose}><Icon n="x" s={14} /></button>
+        </div>
+        <div className="mbody">
+          {/* Indústrias */}
+          <div className="fg">
+            <label className="fl">Indústrias destinatárias</label>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+              <input className="fc" value={buyerSearch} onChange={e => setBuyerSearch(e.target.value)} placeholder="🔍 Buscar por nome ou CNPJ" onKeyDown={e => e.key === 'Enter' && searchBuyers()} />
+              <button className="btn bo bsm" onClick={searchBuyers} disabled={loading}>Buscar</button>
+            </div>
+            <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--fog)', borderRadius: 8 }}>
+              {loading ? (
+                <div style={{ padding: 16, textAlign: 'center', color: 'var(--mist)' }}><span className="spinner"></span></div>
+              ) : buyers.length === 0 ? (
+                <div style={{ padding: 16, textAlign: 'center', color: 'var(--mist)', fontSize: 13 }}>Nenhuma indústria encontrada</div>
+              ) : buyers.map(b => (
+                <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, borderBottom: '1px solid var(--haze)', cursor: 'pointer', background: selectedBuyers.has(b.id) ? 'var(--sap1)' : '#fff' }} onClick={() => toggleBuyer(b.id)}>
+                  <input type="checkbox" checked={selectedBuyers.has(b.id)} readOnly />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700 }}>{b.name}</div>
+                    {b.doc_number && <div style={{ fontSize: 11, color: 'var(--mist)' }}>{b.doc_number}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Mensagem */}
+          <div className="fg">
+            <label className="fl">Mensagem (opcional)</label>
+            <textarea className="fc" rows={2} value={message} onChange={e => setMessage(e.target.value)}
+              placeholder="Ex: Oferta especial, fim de mês, 10% off no granito branco" />
+          </div>
+
+          {/* Blocos */}
+          <div className="fg">
+            <label className="fl">Blocos para ofertar ({selectedBlocks.size} de {availableBlocks.length})</label>
+            <input className="fc" style={{ marginBottom: 8 }} value={blockSearch} onChange={e => setBlockSearch(e.target.value)} placeholder="🔍 Buscar bloco" />
+            <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--fog)', borderRadius: 8 }}>
+              {filteredBlocks.length === 0 ? (
+                <div style={{ padding: 16, textAlign: 'center', color: 'var(--mist)', fontSize: 13 }}>Nenhum bloco disponível</div>
+              ) : filteredBlocks.map(b => (
+                <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 8, borderBottom: '1px solid var(--haze)', cursor: 'pointer', background: selectedBlocks.has(b.id) ? 'var(--sap1)' : '#fff' }} onClick={() => toggleBlock(b.id)}>
+                  <input type="checkbox" checked={selectedBlocks.has(b.id)} readOnly />
+                  <div style={{ flex: 1, fontSize: 13 }}>
+                    <strong>{b.code}</strong> · {b.material}
+                    {b.net_volume && <span style={{ color: 'var(--mist)', marginLeft: 6 }}>· {Number(b.net_volume).toFixed(2)} m³</span>}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--sap7)' }}>{money(b.total_value, b.currency)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Prazo */}
+          <div className="fg">
+            <label className="fl">Prazo de validade *</label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {[3, 7, 15].map(d => (
+                <button key={d}
+                  className={'btn bsm ' + (validDays === d ? 'bb' : 'bo')}
+                  onClick={() => setValidDays(d)}>
+                  {d} dias
+                </button>
+              ))}
+              <input className="fc" type="number" min="1" max="15" style={{ width: 100, fontSize: 13 }} value={validDays} onChange={e => setValidDays(parseInt(e.target.value) || 7)} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 4 }}>Máximo: 15 dias</div>
+          </div>
+        </div>
+        <div className="mfoot">
+          <button className="btn bo" onClick={onClose} disabled={saving}>Cancelar</button>
+          <button className="btn bb" onClick={send} disabled={saving}>
+            {saving ? <><span className="spinner"></span> Enviando</> : `🎁 Ofertar para ${selectedBuyers.size} indústria(s)`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function IndOrdersPage({ profile, buyerData, onChange, toast }) {
   const orders = buyerData?.purchaseOrders || []
   const visits = buyerData?.visits || []
@@ -10721,6 +11469,7 @@ export default function App() {
       { p: 'ind_dashboard',         l: 'Dashboard',           i: 'grid' },
       { p: 'ind_new_visit',         l: 'Cadastrar Inspeção',  i: 'plus' },
       { p: 'ind_quarry_catalog',    l: 'Catálogo da Pedreira', i: 'cube' },
+      { p: 'ind_catalog_requests',  l: 'Solicitações',        i: 'check' },
       { p: 'ind_catalog',           l: 'Catálogo Interno',    i: 'cube' },
       { p: 'ind_visits',            l: 'Inspeções',           i: 'check' },
       { p: 'ind_orders',            l: 'Meus Pedidos',         i: 'card' },
@@ -10742,6 +11491,7 @@ export default function App() {
       { p: 'blocks',      l: 'Blocos',            i: 'cube' },
       { p: 'reserve',     l: 'Reserva Comercial', i: 'cube' },
       { p: 'purchase_orders', l: 'Pedido de Compra', i: 'card' },
+      { p: 'quarry_requests', l: 'Solicitações',    i: 'check' },
       { p: 'sales',       l: 'Vendas',            i: 'cart' },
       { p: 'sold_blocks', l: 'Blocos Vendidos',   i: 'check' },
       { p: 'releases',    l: 'Liberar Catálogo',  i: 'check' },
@@ -10763,6 +11513,7 @@ export default function App() {
       { p: 'blocks',      l: 'Blocos',            i: 'cube' },
       { p: 'reserve',     l: 'Reserva Comercial', i: 'cube' },
       { p: 'purchase_orders', l: 'Pedido de Compra', i: 'card' },
+      { p: 'quarry_requests', l: 'Solicitações',    i: 'check' },
       { p: 'sales',       l: 'Minhas Vendas',     i: 'cart' },
       { p: 'sold_blocks', l: 'Blocos Vendidos',   i: 'check' },
       { p: 'releases',    l: 'Liberar Catálogo',  i: 'check' },
@@ -10794,12 +11545,14 @@ export default function App() {
       case 'ind_quarry_catalog':    return <IndQuarryCatalogPage profile={profile} buyerData={buyerData} toast={showToast} />
       case 'ind_catalog':           return <IndCatalogPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'ind_orders':            return <IndOrdersPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
+      case 'ind_catalog_requests':  return <IndCatalogRequestsPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'ind_bought_blocks':     return <IndBoughtBlocksPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'ind_purchases':         return <IndPurchasesPage profile={profile} buyerData={buyerData} onChange={() => loadData(profile)} toast={showToast} />
       case 'dashboard':   return <Dashboard blocks={blocks} quarries={quarries} clients={clients} sales={sales} />
       case 'blocks':      return <BlocksPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />
       case 'sales':       return <SalesPage profile={profile} sales={sales} blocks={blocks} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
       case 'purchase_orders': return <QuarryPurchaseOrdersPage profile={profile} onChange={() => loadData(profile)} toast={showToast} />
+      case 'quarry_requests': return <QuarryCatalogRequestsPage profile={profile} blocks={blocks} clients={clients} onChange={() => loadData(profile)} toast={showToast} />
       case 'sold_blocks': return <SoldBlocksPage profile={profile} blocks={blocks} quarries={quarries} sales={sales} onChange={() => loadData(profile)} toast={showToast} />
       case 'releases':    return <ReleasesPage profile={profile} blocks={blocks} clients={clients} releases={releases} quarries={quarries} onChange={() => loadData(profile)} toast={showToast} />
       case 'reserve':     return <ReserveCommercialPage profile={profile} blocks={blocks} quarries={quarries} clients={clients} payments={payments} onChange={() => loadData(profile)} toast={showToast} />

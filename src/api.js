@@ -1267,6 +1267,7 @@ export async function loadBuyerCompanyData(profile) {
     cartItems,
     purchases,
     purchaseOrders,
+    catalogRequests,
   ] = await Promise.all([
     getBuyerCompany(companyId),
     supabase.from('profiles').select('*').eq('buyer_company_id', companyId).then(r => r.data || []),
@@ -1284,6 +1285,7 @@ export async function loadBuyerCompanyData(profile) {
     })(),
     supabase.from('purchases').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []).catch(() => []),
     supabase.from('purchase_orders').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []).catch(() => []),
+    supabase.from('catalog_requests').select('*').eq('buyer_company_id', companyId).order('created_at', { ascending: false }).then(r => r.data || []).catch(() => []),
   ])
 
   // Carrega itens das listas
@@ -1317,6 +1319,7 @@ export async function loadBuyerCompanyData(profile) {
     visits,
     purchases,
     purchaseOrders,
+    catalogRequests,
   }
 }
 
@@ -1807,47 +1810,51 @@ export async function listPaymentMethodsForQuarry(quarryCompanyId) {
 // Lista catálogo de blocos liberados das pedreiras (todas) para a indústria visualizar
 // Hoje: marketplace público — todos os blocos com status disponível
 export async function listIndQuarryCatalog(profile) {
-  // Mostra apenas blocos LIBERADOS para a indústria.
-  // A pedreira libera blocos para um cliente do CRM, e esse cliente está
-  // vinculado ao buyer_company_id da indústria (coluna clients.buyer_company_id).
+  // Mostra blocos LIBERADOS para a indústria, considerando dois caminhos:
+  //   1) Sistema novo: block_releases.buyer_company_id = profile.buyer_company_id
+  //   2) Sistema antigo: block_releases.client_id (cliente vinculado à indústria via clients.buyer_company_id)
+  // Filtra liberações expiradas (valid_until < now) e blocos vendidos/reservados.
   if (!profile?.buyer_company_id) return []
 
-  // 1. Acha os clientes (em qualquer pedreira) vinculados a esta indústria
-  const { data: linkedClients, error: clientErr } = await supabase
-    .from('clients')
-    .select('id')
-    .eq('buyer_company_id', profile.buyer_company_id)
-  if (clientErr) {
-    console.warn('Erro ao buscar clientes vinculados:', clientErr)
-    return []
-  }
-  if (!linkedClients || linkedClients.length === 0) return []
+  const now = new Date().toISOString()
 
-  const clientIds = linkedClients.map(c => c.id)
-
-  // 2. Acha os block_releases para esses clientes
-  const { data: releases, error: relErr } = await supabase
+  // 1. Liberações via buyer_company_id direto (sistema novo)
+  const { data: directReleases } = await supabase
     .from('block_releases')
-    .select('block:blocks(*, quarry:quarries(name, location))')
-    .in('client_id', clientIds)
-  if (relErr) {
-    console.warn('Erro ao buscar releases:', relErr)
-    return []
+    .select('valid_until, message, block:blocks(*, quarry:quarries(name, location))')
+    .eq('buyer_company_id', profile.buyer_company_id)
+
+  // 2. Liberações via client (sistema antigo)
+  let clientReleases = []
+  const { data: linkedClients } = await supabase
+    .from('clients').select('id').eq('buyer_company_id', profile.buyer_company_id)
+  if (linkedClients && linkedClients.length > 0) {
+    const { data } = await supabase
+      .from('block_releases')
+      .select('valid_until, message, block:blocks(*, quarry:quarries(name, location))')
+      .in('client_id', linkedClients.map(c => c.id))
+    clientReleases = data || []
   }
 
-  // 3. Deduplica blocos (um bloco pode estar liberado pra mais de um cliente da mesma indústria)
-  // Filtra blocos com status 'reserved' (pedido pendente) e 'sold' (já vendidos)
+  // Funde os dois conjuntos
+  const allReleases = [...(directReleases || []), ...clientReleases]
+
+  // 3. Deduplica blocos e filtra fora os indisponíveis / expirados
   const seen = new Set()
   const blocks = []
-  for (const r of (releases || [])) {
+  for (const r of allReleases) {
     const b = r.block
     if (!b || seen.has(b.id)) continue
-    // Filtra fora os blocos não-disponíveis
+    // Filtra status indisponíveis
     if (b.status === 'reserved' || b.status === 'sold') continue
+    // Filtra liberações expiradas (apenas se houver prazo)
+    if (r.valid_until && r.valid_until < now) continue
     seen.add(b.id)
     blocks.push({
       ...b,
       quarry_name: b.quarry?.name || null,
+      release_valid_until: r.valid_until || null,
+      release_message: r.message || null,
       photos: Array.isArray(b.photos) ? b.photos
         : (typeof b.photos === 'string' ? (b.photos.startsWith('[') ? JSON.parse(b.photos) : [b.photos]) : []),
     })
@@ -2803,3 +2810,248 @@ export async function approvePurchaseOrder(profile, orderId) {
   console.log('[approve] ✅ APROVAÇÃO COMPLETA')
   return { purchaseId, saleId, orderId }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// SOLICITAÇÕES E OFERTAS DE CATÁLOGO (Etapa 10)
+// ═══════════════════════════════════════════════════════════════
+
+// Busca pedreiras (pra indústria fazer solicitação)
+// Filtra por nome, CNPJ ou material disponível em estoque
+export async function searchQuarries(searchTerm) {
+  if (!searchTerm || searchTerm.length < 2) {
+    // Retorna lista de todas as pedreiras (owners)
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, name, doc_number, email')
+      .eq('role', 'owner')
+      .order('name')
+    if (error) return []
+    return data || []
+  }
+
+  const term = searchTerm.toLowerCase()
+
+  // 1. Busca por nome ou CNPJ
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, name, doc_number, email')
+    .eq('role', 'owner')
+    .or(`name.ilike.%${term}%,doc_number.ilike.%${term}%`)
+
+  // 2. Busca por material (em blocks)
+  const { data: blocksWithMaterial } = await supabase
+    .from('blocks')
+    .select('company_id, material')
+    .ilike('material', `%${term}%`)
+    .in('status', ['available', 'produced', 'reserve'])
+
+  // IDs únicos das pedreiras que têm esse material
+  const quarryIdsByMaterial = [...new Set((blocksWithMaterial || []).map(b => b.company_id))]
+  let profilesByMaterial = []
+  if (quarryIdsByMaterial.length > 0) {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, name, doc_number, email')
+      .in('id', quarryIdsByMaterial)
+      .eq('role', 'owner')
+    profilesByMaterial = data || []
+  }
+
+  // Mescla resultados sem duplicar
+  const seen = new Set()
+  const merged = []
+  for (const p of [...(profiles || []), ...profilesByMaterial]) {
+    if (seen.has(p.id)) continue
+    seen.add(p.id)
+    merged.push(p)
+  }
+  return merged
+}
+
+// Busca indústrias (pra pedreira ofertar catálogo)
+export async function searchBuyerCompanies(searchTerm) {
+  let query = supabase.from('buyer_companies').select('*').order('name')
+  if (searchTerm && searchTerm.length >= 2) {
+    const term = searchTerm.toLowerCase()
+    query = query.or(`name.ilike.%${term}%,doc_number.ilike.%${term}%`)
+  }
+  const { data, error } = await query
+  if (error) return []
+  return data || []
+}
+
+// Indústria envia solicitação de catálogo para uma ou várias pedreiras
+// quarryIds: array de IDs de profiles (owners)
+// message: texto da solicitação
+export async function sendCatalogRequest(profile, quarryIds, message) {
+  if (!profile?.buyer_company_id) throw new Error('Sem indústria associada')
+  if (!quarryIds || quarryIds.length === 0) throw new Error('Selecione ao menos uma pedreira')
+  if (!message || !message.trim()) throw new Error('Mensagem é obrigatória')
+
+  const groupId = crypto.randomUUID ? crypto.randomUUID() : undefined
+
+  const { data: buyerCompany } = await supabase
+    .from('buyer_companies').select('name').eq('id', profile.buyer_company_id).single()
+
+  const rows = quarryIds.map(qid => ({
+    buyer_company_id: profile.buyer_company_id,
+    quarry_company_id: qid,
+    message: message.trim(),
+    status: 'pending',
+    sent_by: profile.id,
+    group_id: groupId,
+  }))
+
+  const { data, error } = await supabase
+    .from('catalog_requests').insert(rows).select()
+  if (error) throw error
+
+  // Notifica equipes
+  for (const qid of quarryIds) {
+    const { data: quarryTeam } = await supabase
+      .from('profiles').select('id')
+      .or(`id.eq.${qid},company_id.eq.${qid}`)
+    for (const t of (quarryTeam || [])) {
+      await createIndNotification(t.id, '📨 Nova solicitação de catálogo',
+        `${buyerCompany?.name || 'Uma indústria'} solicitou catálogo: "${message.slice(0, 80)}${message.length > 80 ? '...' : ''}"`)
+    }
+  }
+
+  // Notifica equipe da indústria
+  const { data: buyerTeam } = await supabase
+    .from('profiles').select('id').eq('buyer_company_id', profile.buyer_company_id)
+  for (const t of (buyerTeam || [])) {
+    await createIndNotification(t.id, '📤 Solicitação enviada',
+      `Solicitação enviada para ${quarryIds.length} pedreira(s).`)
+  }
+
+  return data
+}
+
+// Pedreira responde uma solicitação de catálogo
+// blockIds: blocos que ela quer liberar
+// validDays: prazo em dias (3, 7, 15...)
+export async function replyCatalogRequest(profile, requestId, blockIds, validDays, replyMessage) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+
+  const { data: req, error: e1 } = await supabase
+    .from('catalog_requests').select('*').eq('id', requestId).single()
+  if (e1) throw e1
+  if (req.status !== 'pending') throw new Error('Solicitação já respondida ou expirada.')
+
+  const validUntil = new Date()
+  validUntil.setDate(validUntil.getDate() + (parseInt(validDays) || 7))
+
+  // 1. Cria as liberações (block_releases) com prazo + vínculo direto à indústria
+  if (blockIds && blockIds.length > 0) {
+    const rows = blockIds.map(blockId => ({
+      block_id: blockId,
+      buyer_company_id: req.buyer_company_id,
+      company_id: companyId,
+      valid_until: validUntil.toISOString(),
+      message: replyMessage || null,
+      request_id: requestId,
+      data_liberacao: new Date().toISOString(),
+    }))
+    const { error: relErr } = await supabase.from('block_releases').insert(rows)
+    if (relErr) {
+      console.warn('Erro ao criar releases:', relErr)
+      throw new Error('Falha ao liberar blocos: ' + relErr.message)
+    }
+  }
+
+  // 2. Atualiza a solicitação
+  await supabase.from('catalog_requests').update({
+    status: 'answered',
+    reply_message: replyMessage || null,
+    replied_at: new Date().toISOString(),
+    replied_by: profile.id,
+  }).eq('id', requestId)
+
+  // 3. Notifica equipe da indústria
+  const { data: buyerCompany } = await supabase
+    .from('buyer_companies').select('name').eq('id', req.buyer_company_id).single()
+  const { data: quarryProfile } = await supabase
+    .from('profiles').select('name').eq('id', companyId).single()
+  const { data: buyerTeam } = await supabase
+    .from('profiles').select('id').eq('buyer_company_id', req.buyer_company_id)
+  for (const t of (buyerTeam || [])) {
+    await createIndNotification(t.id, '📥 Resposta recebida',
+      `${quarryProfile?.name || 'A pedreira'} respondeu sua solicitação${blockIds.length > 0 ? ` e liberou ${blockIds.length} bloco(s)` : ''}.`)
+  }
+
+  return { validUntil: validUntil.toISOString(), blockCount: blockIds?.length || 0 }
+}
+
+// Pedreira oferta catálogo a uma ou várias indústrias (sem solicitação prévia)
+export async function offerCatalogToBuyers(profile, buyerCompanyIds, blockIds, validDays, message) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+
+  if (!buyerCompanyIds || buyerCompanyIds.length === 0) throw new Error('Selecione ao menos uma indústria')
+  if (!blockIds || blockIds.length === 0) throw new Error('Selecione ao menos um bloco')
+
+  const validUntil = new Date()
+  validUntil.setDate(validUntil.getDate() + (parseInt(validDays) || 7))
+
+  const { data: quarryProfile } = await supabase
+    .from('profiles').select('name').eq('id', companyId).single()
+
+  let totalReleases = 0
+  for (const buyerCompanyId of buyerCompanyIds) {
+    const rows = blockIds.map(blockId => ({
+      block_id: blockId,
+      buyer_company_id: buyerCompanyId,
+      company_id: companyId,
+      valid_until: validUntil.toISOString(),
+      message: message || null,
+      data_liberacao: new Date().toISOString(),
+    }))
+    const { error } = await supabase.from('block_releases').insert(rows)
+    if (error) {
+      console.warn('Erro ao liberar pra', buyerCompanyId, error)
+      continue
+    }
+    totalReleases++
+
+    // Notifica equipe da indústria
+    const { data: buyerTeam } = await supabase
+      .from('profiles').select('id').eq('buyer_company_id', buyerCompanyId)
+    for (const t of (buyerTeam || [])) {
+      await createIndNotification(t.id, '🎁 Nova oferta de catálogo',
+        `${quarryProfile?.name || 'Uma pedreira'} liberou ${blockIds.length} bloco(s) por ${validDays} dia(s).`)
+    }
+  }
+
+  return { totalReleases, validUntil: validUntil.toISOString() }
+}
+
+// Lista solicitações da indústria (enviadas)
+export async function listCatalogRequestsForBuyer(profile) {
+  if (!profile?.buyer_company_id) return []
+  const { data, error } = await supabase
+    .from('catalog_requests').select('*')
+    .eq('buyer_company_id', profile.buyer_company_id)
+    .order('created_at', { ascending: false })
+  if (error) return []
+  return data || []
+}
+
+// Lista solicitações que chegaram pra pedreira
+export async function listCatalogRequestsForQuarry(profile) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+  const { data, error } = await supabase
+    .from('catalog_requests').select('*')
+    .eq('quarry_company_id', companyId)
+    .order('created_at', { ascending: false })
+  if (error) return []
+  return data || []
+}
+
+// Indústria cancela uma solicitação que enviou (status pending)
+export async function cancelCatalogRequest(profile, requestId) {
+  await supabase.from('catalog_requests').update({
+    status: 'cancelled',
+  }).eq('id', requestId)
+}
+
+// Atualiza a função listIndQuarryCatalog para incluir o sistema novo (buyer_company_id direto + valid_until)
