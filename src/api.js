@@ -2823,7 +2823,7 @@ export async function searchQuarries(searchTerm) {
   if (!searchTerm || searchTerm.length < 2) {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, name, email')
+      .select('id, name')
       .eq('role', 'owner')
       .order('name')
     console.log('[searchQuarries] sem termo - profiles:', data?.length || 0, 'error:', error)
@@ -2833,10 +2833,10 @@ export async function searchQuarries(searchTerm) {
 
   const term = searchTerm.toLowerCase()
 
-  // 1. Busca por nome (CNPJ não existe na tabela profiles)
+  // 1. Busca por nome
   const { data: profiles, error: pErr } = await supabase
     .from('profiles')
-    .select('id, name, email')
+    .select('id, name')
     .eq('role', 'owner')
     .ilike('name', `%${term}%`)
   console.log('[searchQuarries] por nome:', profiles?.length || 0, 'error:', pErr)
@@ -2857,7 +2857,7 @@ export async function searchQuarries(searchTerm) {
   if (quarryIdsByMaterial.length > 0) {
     const { data, error: pmErr } = await supabase
       .from('profiles')
-      .select('id, name, email')
+      .select('id, name')
       .in('id', quarryIdsByMaterial)
       .eq('role', 'owner')
     console.log('[searchQuarries] profiles por material:', data?.length || 0, 'error:', pmErr)

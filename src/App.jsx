@@ -8948,7 +8948,6 @@ function NewCatalogRequestModal({ profile, onClose, onSent, toast }) {
                     <input type="checkbox" checked={selected.has(q.id)} readOnly />
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700 }}>{q.name}</div>
-                      {q.email && <div style={{ fontSize: 11, color: 'var(--mist)' }}>{q.email}</div>}
                     </div>
                   </div>
                 ))}
