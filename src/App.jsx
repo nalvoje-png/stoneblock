@@ -2296,6 +2296,222 @@ ${dollarRate > 0 ? `
   win.document.close()
 }
 
+// ═══════════════════════════════════════════════════════════════
+// ROMANEIO DO LADO DA INDÚSTRIA (Compras)
+// Mostra cabeçalho da PEDREIRA (logo + nome) e dados da indústria
+// ═══════════════════════════════════════════════════════════════
+async function generatePurchaseRomaneio(purchase, profile, buyerCompany) {
+  // 1. Carrega dados da PEDREIRA (logo + nome)
+  let quarryOwner = null
+  try {
+    quarryOwner = await api.getCompanyOwnerProfile(purchase.quarry_company_id)
+  } catch (e) { console.warn('Erro ao buscar pedreira:', e) }
+
+  const quarryName = (quarryOwner?.company_name || quarryOwner?.name || 'PEDREIRA').toUpperCase()
+  const quarryLogo = quarryOwner?.logo_url || ''
+  const industryName = (buyerCompany?.name || profile?.company_name || 'INDÚSTRIA').toUpperCase()
+
+  // 2. Carrega os blocos da inspeção
+  let blocks = []
+  try {
+    const { data: insps } = await supabase
+      .from('block_inspections').select('*')
+      .eq('inspection_id', purchase.inspection_id)
+    if (insps && insps.length > 0) {
+      const origIds = insps.map(i => i.original_block_id).filter(Boolean)
+      const { data: origBlocks } = await supabase
+        .from('blocks').select('*').in('id', origIds)
+      // Funde dados negociados (prioridade) com originais (fallback)
+      blocks = insps.map(i => {
+        const orig = (origBlocks || []).find(b => b.id === i.original_block_id) || {}
+        const nVol = Number(i.negotiated_net_volume) || Number(orig.net_volume) || 0
+        let val, m3
+        if (i.negotiated_price_m3 && nVol > 0) {
+          m3 = Number(i.negotiated_price_m3)
+          val = m3 * nVol
+        } else if (i.negotiated_value) {
+          val = Number(i.negotiated_value)
+          m3 = nVol > 0 ? val / nVol : 0
+        } else {
+          val = Number(orig.total_value) || 0
+          m3 = Number(orig.price_m3) || (nVol > 0 ? val / nVol : 0)
+        }
+        return {
+          code: orig.code || '',
+          classification: orig.classification || '',
+          material: orig.material || '',
+          net_l: i.negotiated_l || orig.net_l || 0,
+          net_h: i.negotiated_h || orig.net_h || 0,
+          net_w: i.negotiated_w || orig.net_w || 0,
+          net_volume: nVol,
+          price_m3: m3,
+          total_value: val,
+          currency: i.negotiated_currency || orig.currency || 'USD',
+        }
+      })
+    }
+  } catch (e) { console.warn('Erro ao carregar blocos:', e) }
+
+  const dt = new Date(purchase.created_at)
+  const dataFmt = `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`
+
+  const totalM3 = blocks.reduce((a, b) => a + (Number(b.net_volume) || 0), 0)
+  const totalBRL = Number(purchase.total_brl) || 0
+  const totalUSD = Number(purchase.total_usd) || 0
+  const dollarRate = Number(purchase.dollar_rate) || 0
+
+  const fmtNum = (n, d = 2) => Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d })
+  const fmtBRL = (n) => 'R$ ' + Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const numEmpty = Math.max(0, 10 - blocks.length)
+
+  const rowsHTML = blocks.map(b => {
+    let priceUSD = 0, priceBRL = 0
+    if (b.currency === 'USD') {
+      priceUSD = Number(b.price_m3) || 0
+      priceBRL = dollarRate > 0 ? priceUSD * dollarRate : 0
+    } else {
+      priceBRL = Number(b.price_m3) || 0
+      priceUSD = dollarRate > 0 ? priceBRL / dollarRate : 0
+    }
+    let totalCell = ''
+    if (b.currency === 'BRL') totalCell = fmtBRL(b.total_value)
+    else if (b.currency === 'USD') totalCell = 'US$ ' + fmtNum(b.total_value)
+    return `
+    <tr>
+      <td class="num">${b.code || ''}</td>
+      <td class="ctr">${b.classification || ''}</td>
+      <td class="num">${fmtNum(b.net_l)}</td>
+      <td class="num">${fmtNum(b.net_h)}</td>
+      <td class="num">${fmtNum(b.net_w)}</td>
+      <td class="num">${fmtNum(b.net_volume)}</td>
+      <td class="num">${priceUSD > 0 ? fmtNum(priceUSD) : ''}</td>
+      <td class="num">${priceBRL > 0 ? fmtBRL(priceBRL) : ''}</td>
+      <td class="num">${totalCell}</td>
+      <td class="ctr">${b.classification || ''}</td>
+    </tr>
+  `}).join('')
+
+  const emptyRows = Array(numEmpty).fill(`
+    <tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+  `).join('')
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Romaneio de Compra - ${quarryName}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; padding: 20px; color: #000; font-size: 12px; }
+  .topo { background: #b8b8b8; padding: 8px 12px; display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .topo img { max-height: 48px; max-width: 100px; object-fit: contain; }
+  .topo h1 { font-size: 18px; letter-spacing: 1px; }
+  .cab { display: grid; grid-template-columns: auto 1fr; gap: 0; margin-bottom: 14px; width: 70%; }
+  .cab .lbl { background: #fff; border: 1px solid #888; padding: 4px 10px; font-weight: bold; }
+  .cab .val { border: 1px solid #888; border-left: none; padding: 4px 10px; }
+  .dolar-row { display: grid; grid-template-columns: auto 1fr; gap: 0; margin-bottom: 14px; width: 30%; }
+  .dolar-row .lbl { background: #fff; border: 1px solid #888; padding: 4px 10px; font-weight: bold; }
+  .dolar-row .val { border: 1px solid #888; border-left: none; padding: 4px 10px; text-align: center; font-weight: bold; }
+  .titulo { background: #c5d4eb; padding: 6px; text-align: center; font-weight: bold; font-size: 14px; margin-bottom: 0; border: 1px solid #888; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #888; padding: 4px 6px; font-size: 11px; }
+  th { background: #e5e5e5; font-weight: bold; text-align: center; }
+  .group-h { background: #fff; text-align: center; font-weight: bold; }
+  td.num { text-align: right; }
+  td.ctr { text-align: center; }
+  .totais { background: #d4d4d4; }
+  .totais td { font-weight: bold; }
+  .obs-area { margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+  .obs-label { font-weight: bold; margin-bottom: 6px; }
+  .obs-content { background: #e8f0fa; min-height: 70px; padding: 8px; border-bottom: 1px solid #000; }
+  .sig-line { border-top: 1px solid #000; padding-top: 6px; text-align: center; font-weight: bold; margin-top: 60px; }
+  @media print { body { padding: 10mm; } }
+</style>
+</head>
+<body>
+
+<div class="topo">
+  ${quarryLogo ? `<img src="${quarryLogo}" alt="logo">` : ''}
+  <h1>${quarryName}</h1>
+</div>
+
+<div class="cab">
+  <div class="lbl">Cliente:</div><div class="val">${industryName}</div>
+  <div class="lbl">Data:</div><div class="val">${dataFmt}</div>
+</div>
+
+${dollarRate > 0 ? `
+<div class="dolar-row">
+  <div class="lbl">Dolar:</div><div class="val">${fmtNum(dollarRate, 4)}</div>
+</div>
+` : ''}
+
+<div class="titulo">Romaneio de Compra</div>
+
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">Código</th>
+      <th rowspan="2">Tipo</th>
+      <th colspan="4" class="group-h">Medidas Líquidas</th>
+      <th rowspan="2">Vr M3 U$:</th>
+      <th rowspan="2">Valor M3 R$:</th>
+      <th rowspan="2">Total:</th>
+      <th rowspan="2">Class.:</th>
+    </tr>
+    <tr>
+      <th>Comp.:</th>
+      <th>Alt.:</th>
+      <th>Larg.:</th>
+      <th>Total:</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${rowsHTML}
+    ${emptyRows}
+    <tr class="totais">
+      <td colspan="2"></td>
+      <td colspan="3" style="text-align:right;">Total M3 Líquido:</td>
+      <td class="num">${fmtNum(totalM3)}</td>
+      <td></td>
+      <td style="text-align:right;">Total:</td>
+      <td class="num">${totalBRL > 0 ? fmtBRL(totalBRL) : (totalUSD > 0 ? 'US$ ' + fmtNum(totalUSD) : '')}</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="obs-area">
+  <div class="obs-box">
+    <div class="obs-label">Observações:</div>
+    <div class="obs-content">${[
+      purchase.payment_method_name ? 'Forma de pagamento: ' + purchase.payment_method_name : '',
+      purchase.notes || ''
+    ].filter(Boolean).join('<br>')}</div>
+  </div>
+  <div class="obs-box">
+    <div class="sig-line">${quarryName}</div>
+  </div>
+</div>
+
+<script>
+  window.onload = function() {
+    setTimeout(function(){ window.print(); }, 500);
+  };
+</script>
+</body>
+</html>`
+
+  const win = window.open('', '_blank')
+  if (!win) {
+    alert('Bloqueador de pop-up impediu a abertura do romaneio. Permita pop-ups deste site.')
+    return
+  }
+  win.document.write(html)
+  win.document.close()
+}
+
 
 // ═══════════════════════════════════════════════════════════════
 // SALES HISTORY PAGE
@@ -10776,8 +10992,8 @@ function IndPurchasesPage({ profile, buyerData, onChange, toast }) {
             const quarry = externalQuarries.find(q => q.id === p.external_quarry_id)
             const marker = team.find(m => m.id === visit?.marker_id)
             return (
-              <div key={p.id} className="card" style={{ cursor: 'pointer', borderTop: '4px solid var(--ok)' }} onClick={() => setDetail({ purchase: p, visit, quarry, marker })}>
-                <div className="cb">
+              <div key={p.id} className="card" style={{ borderTop: '4px solid var(--ok)' }}>
+                <div className="cb" style={{ cursor: 'pointer' }} onClick={() => setDetail({ purchase: p, visit, quarry, marker })}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                     <span className="bdg" style={{ background: '#dcfce7', color: '#15803d', fontSize: 11 }}>✓ Finalizada</span>
                     <span style={{ fontSize: 11, color: 'var(--mist)' }}>{fmtDate(p.created_at)}</span>
@@ -10793,6 +11009,14 @@ function IndPurchasesPage({ profile, buyerData, onChange, toast }) {
                   {p.payment_method_name && (
                     <div style={{ fontSize: 11, color: 'var(--mist)', marginTop: 4 }}>💳 {p.payment_method_name}</div>
                   )}
+                </div>
+                <div style={{ padding: '0 14px 12px', display: 'flex', gap: 6 }}>
+                  <button className="btn bo bsm" style={{ flex: 1, fontSize: 11 }} onClick={() => setDetail({ purchase: p, visit, quarry, marker })}>
+                    Ver Detalhes
+                  </button>
+                  <button className="btn bb bsm" style={{ flex: 1, fontSize: 11 }} onClick={() => generatePurchaseRomaneio(p, profile, buyerData?.company)} title="Imprimir Romaneio">
+                    📄 Romaneio
+                  </button>
                 </div>
               </div>
             )
@@ -10958,6 +11182,9 @@ function PurchaseDetailModal({ item, buyerData, onClose }) {
         </div>
         <div className="mfoot">
           <button className="btn bo" onClick={onClose}>Fechar</button>
+          <button className="btn bb" onClick={() => generatePurchaseRomaneio(purchase, null, buyerData?.company)}>
+            📄 Gerar Romaneio
+          </button>
         </div>
       </div>
 
