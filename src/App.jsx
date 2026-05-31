@@ -1,3 +1,4 @@
+// Stone Block Etapa 11 - 2026-05-31 18:55
 // src/App.jsx
 // ═══════════════════════════════════════════════════════════════
 // Stone Block — Sistema de gestão para pedreiras
@@ -2891,10 +2892,10 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
     } finally { setSaving(false) }
   }
 
-  const revoke = async (blockId, clientId) => {
-    if (!window.confirm('Revogar este acesso?')) return
+  const revoke = async (releaseId) => {
+    if (!window.confirm('Revogar este acesso? O bloco sairá do catálogo da indústria imediatamente.')) return
     try {
-      await api.revokeRelease(blockId, clientId)
+      await api.revokeRelease(releaseId)
       await onChange()
       toast('Acesso revogado.', 'ok')
     } catch (e) { toast('Erro: ' + e.message, 'err') }
@@ -2924,7 +2925,7 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
         // Aplica filtros
         const filteredReleases = releases.filter(r => {
           const b = blocks.find(x => x.id === r.block_id)
-          if (filterClient && r.client_id !== filterClient) return false
+          if (filterClient && r.client_id !== filterClient && r.buyer_company_id !== filterClient) return false
           if (filterMaterial && b?.material !== filterMaterial) return false
           if (filterQuarry && b?.quarry_id !== filterQuarry) return false
           return true
@@ -2937,7 +2938,7 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--mist)', textTransform: 'uppercase', letterSpacing: .5 }}>Filtros:</span>
                   <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 220 }} value={filterClient} onChange={e => setFilterClient(e.target.value)}>
-                    <option value="">Todos os clientes</option>
+                    <option value="">Todos os destinatários</option>
                     {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                   <select className="fc" style={{ fontSize: 13, padding: '7px 10px', maxWidth: 200 }} value={filterQuarry} onChange={e => setFilterQuarry(e.target.value)}>
@@ -2962,40 +2963,57 @@ function ReleasesPage({ profile, blocks, clients, releases, quarries, onChange, 
 
             <div className="card"><div className="tw"><table>
               <thead><tr>
-                <th></th><th>Bloco</th><th>Cliente</th><th>Liberado por</th><th>Data</th><th></th>
+                <th></th><th>Bloco</th><th>Destinatário</th><th>Origem</th><th>Data / Validade</th><th></th>
               </tr></thead>
               <tbody>
                 {filteredReleases.map(r => {
                   const b = blocks.find(x => x.id === r.block_id)
                   const photo = b?.photos && b.photos[0]
+                  const dest = r.client?.name || r.buyer_company?.name || '—'
+                  let origem, origemColor
+                  if (r.request_id) { origem = '📨 Resposta a solicitação'; origemColor = '#15803d' }
+                  else if (r.buyer_company_id) { origem = '🎁 Oferta direta'; origemColor = '#0c1a2e' }
+                  else { origem = '📋 Liberação manual'; origemColor = 'var(--mist)' }
+
+                  let prazoText = null
+                  if (r.valid_until) {
+                    const ms = new Date(r.valid_until) - new Date()
+                    const days = Math.floor(ms / (1000 * 60 * 60 * 24))
+                    const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+                    prazoText = days > 0 ? `⏰ ${days}d` : (hours > 0 ? `⏰ ${hours}h` : '⏰ expirando')
+                  }
+
                   return (
                     <tr key={r.id} style={{ cursor: b ? 'pointer' : 'default' }} onClick={() => b && setDetailBlock(b)}>
-                  <td style={{ width: 56 }}>
-                    {photo ? (
-                      <img src={photo} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 5 }} />
-                    ) : (
-                      <div style={{ width: 44, height: 44, background: 'var(--haze)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Icon n="cube" s={18} c="var(--mist)" />
-                      </div>
-                    )}
-                  </td>
-                  <td>
-                    <strong style={{ color: 'var(--sap7)' }}>{b?.code || '—'}</strong>
-                    <div style={{ color: 'var(--mist)', fontSize: 12 }}>{b?.material}</div>
-                  </td>
-                  <td style={{ fontWeight: 600 }}>{r.client?.name || '—'}</td>
-                  <td style={{ fontSize: 13 }}>{r.liberador?.name || '—'}</td>
-                  <td style={{ fontSize: 13, color: 'var(--mist)' }}>{fmtDate(r.data_liberacao)}</td>
-                  <td onClick={e => e.stopPropagation()}>
-                    <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => revoke(r.block_id, r.client_id)}>
-                      <Icon n="trash" s={13} c="var(--err)" /> Revogar
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table></div></div>
+                      <td style={{ width: 56 }}>
+                        {photo ? (
+                          <img src={photo} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 5 }} />
+                        ) : (
+                          <div style={{ width: 44, height: 44, background: 'var(--haze)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Icon n="cube" s={18} c="var(--mist)" />
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        <strong style={{ color: 'var(--sap7)' }}>{b?.code || '—'}</strong>
+                        <div style={{ color: 'var(--mist)', fontSize: 12 }}>{b?.material}</div>
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{dest}</td>
+                      <td style={{ fontSize: 12, color: origemColor, fontWeight: 600 }}>{origem}</td>
+                      <td style={{ fontSize: 13, color: 'var(--mist)' }}>
+                        {fmtDate(r.data_liberacao)}
+                        {prazoText && <div style={{ fontSize: 11, color: '#854d0e', fontWeight: 700 }}>{prazoText}</div>}
+                      </td>
+                      <td onClick={e => e.stopPropagation()}>
+                        <button className="btn bo bsm" style={{ color: 'var(--err)' }} onClick={() => revoke(r.id)}>
+                          <Icon n="trash" s={13} c="var(--err)" /> Revogar
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table></div></div>
           </>
         )
       })()}
@@ -8853,6 +8871,8 @@ function IndCatalogRequestsPage({ profile, buyerData, onChange, toast }) {
   const statusBadge = (s) => {
     if (s === 'pending') return <span className="bdg" style={{ background: '#fef3c7', color: '#854d0e' }}>⏳ Aguardando</span>
     if (s === 'answered') return <span className="bdg" style={{ background: '#dcfce7', color: '#15803d' }}>✅ Respondida</span>
+    if (s === 'rejected') return <span className="bdg" style={{ background: '#fee2e2', color: '#991b1b' }}>❌ Rejeitada</span>
+    if (s === 'unavailable') return <span className="bdg" style={{ background: '#f3f4f6', color: '#6b7280' }}>⚠️ Indisponível</span>
     if (s === 'cancelled') return <span className="bdg" style={{ background: '#f3f4f6', color: '#6b7280' }}>🚫 Cancelada</span>
     return null
   }
@@ -9164,12 +9184,29 @@ function QuarryCatalogRequestsPage({ profile, blocks, clients, onChange, toast }
     all: requests.length,
     pending: requests.filter(r => r.status === 'pending').length,
     answered: requests.filter(r => r.status === 'answered').length,
+    rejected: requests.filter(r => r.status === 'rejected').length,
+    unavailable: requests.filter(r => r.status === 'unavailable').length,
     cancelled: requests.filter(r => r.status === 'cancelled').length,
+  }
+
+  const rejectRequest = async (r) => {
+    const reason = window.prompt('Motivo da rejeição (opcional):', '')
+    if (reason === null) return // cancelou o prompt
+    try {
+      await api.rejectCatalogRequest(profile, r.id, reason.trim() || null)
+      toast('Solicitação rejeitada.', 'ok')
+      await load()
+      onChange && onChange()
+    } catch (e) {
+      toast('Erro: ' + e.message, 'err')
+    }
   }
 
   const statusBadge = (s) => {
     if (s === 'pending') return <span className="bdg" style={{ background: '#fef3c7', color: '#854d0e' }}>⏳ Pendente</span>
     if (s === 'answered') return <span className="bdg" style={{ background: '#dcfce7', color: '#15803d' }}>✅ Respondida</span>
+    if (s === 'rejected') return <span className="bdg" style={{ background: '#fee2e2', color: '#991b1b' }}>❌ Rejeitada</span>
+    if (s === 'unavailable') return <span className="bdg" style={{ background: '#f3f4f6', color: '#6b7280' }}>⚠️ Indisponível</span>
     if (s === 'cancelled') return <span className="bdg" style={{ background: '#f3f4f6', color: '#6b7280' }}>🚫 Cancelada</span>
     return null
   }
@@ -9226,13 +9263,28 @@ function QuarryCatalogRequestsPage({ profile, blocks, clients, onChange, toast }
                   "{r.message}"
                 </div>
                 {r.status === 'pending' && (
-                  <button className="btn bb" style={{ width: '100%' }} onClick={() => setReply({ request: r, buyerName: buyerNames[r.buyer_company_id] })}>
-                    📤 Responder
-                  </button>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn bb" style={{ flex: 1 }} onClick={() => setReply({ request: r, buyerName: buyerNames[r.buyer_company_id] })}>
+                      📤 Responder
+                    </button>
+                    <button className="btn bsm" style={{ background: '#fee2e2', color: '#991b1b', padding: '8px 12px' }} onClick={() => rejectRequest(r)}>
+                      ❌ Rejeitar
+                    </button>
+                  </div>
                 )}
                 {r.status === 'answered' && r.reply_message && (
                   <div style={{ fontSize: 12, padding: 8, background: '#dcfce7', borderRadius: 6, color: '#15803d', whiteSpace: 'pre-wrap' }}>
                     <strong>Sua resposta:</strong> {r.reply_message}
+                  </div>
+                )}
+                {r.status === 'rejected' && (
+                  <div style={{ fontSize: 12, padding: 8, background: '#fee2e2', borderRadius: 6, color: '#991b1b', whiteSpace: 'pre-wrap' }}>
+                    <strong>Rejeitada</strong>{r.reply_message ? `: ${r.reply_message}` : '.'}
+                  </div>
+                )}
+                {r.status === 'unavailable' && (
+                  <div style={{ fontSize: 12, padding: 8, background: '#f3f4f6', borderRadius: 6, color: '#6b7280', whiteSpace: 'pre-wrap' }}>
+                    <strong>⚠️ Indisponível</strong> · Liberação revogada
                   </div>
                 )}
               </div>
@@ -9678,8 +9730,20 @@ function PurchaseOrderItemCard({ item }) {
   const inspectionPhotos = insp?.photos || []
   const firstPhoto = inspectionPhotos[0] || officialPhotos[0]
 
+  // Detecta divergência (compara valores negociados x originais cadastrados na pedreira)
+  const hasDivergence = block && (() => {
+    const origNetVol = Number(block.original_net_volume ?? block.net_volume) || 0
+    const origPriceM3 = Number(block.original_price_m3 ?? block.price_m3) || 0
+    const origTotal = Number(block.original_total_value ?? block.total_value) || 0
+    const negNetVol = Number(item.net_volume) || 0
+    const negPriceM3 = Number(item.price_m3) || 0
+    const negTotal = Number(item.total_value) || 0
+    const eq = (a, b) => Math.abs((a || 0) - (b || 0)) < 0.001
+    return !eq(origNetVol, negNetVol) || !eq(origPriceM3, negPriceM3) || !eq(origTotal, negTotal)
+  })()
+
   return (
-    <div style={{ background: 'var(--haze)', borderRadius: 8, overflow: 'hidden' }}>
+    <div style={{ background: 'var(--haze)', borderRadius: 8, overflow: 'hidden', border: hasDivergence ? '2px solid #dc2626' : 'none' }}>
       <div style={{ display: 'flex', gap: 10, padding: 10, cursor: 'pointer', alignItems: 'center' }} onClick={() => setExpanded(!expanded)}>
         {firstPhoto ? (
           <img src={firstPhoto} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
@@ -9687,7 +9751,10 @@ function PurchaseOrderItemCard({ item }) {
           <div style={{ width: 60, height: 60, background: '#fff', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Icon n="cube" s={24} c="var(--mist)" /></div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700 }}>{item.code || block?.code || '?'}</div>
+          <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {item.code || block?.code || '?'}
+            {hasDivergence && <span style={{ fontSize: 10, background: '#dc2626', color: '#fff', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>⚠️ DIVERGÊNCIA</span>}
+          </div>
           <div style={{ fontSize: 12, color: 'var(--mist)' }}>{item.material || block?.material}</div>
           {item.net_volume > 0 && (
             <div style={{ fontSize: 11, color: 'var(--mist)' }}>
@@ -9703,6 +9770,122 @@ function PurchaseOrderItemCard({ item }) {
 
       {expanded && (
         <div style={{ padding: 12, borderTop: '1px solid var(--fog)', background: '#fff' }}>
+          {/* COMPARATIVO: dados originais da pedreira vs negociados (só mostra se houver bloco original) */}
+          {block && (() => {
+            // Valores originais da pedreira (medidas líquidas + preço m³)
+            const origNetL = Number(block.original_net_l ?? block.net_l) || 0
+            const origNetH = Number(block.original_net_h ?? block.net_h) || 0
+            const origNetW = Number(block.original_net_w ?? block.net_w) || 0
+            const origNetVol = Number(block.original_net_volume ?? block.net_volume) || 0
+            const origPriceM3 = Number(block.original_price_m3 ?? block.price_m3) || 0
+            const origTotalValue = Number(block.original_total_value ?? block.total_value) || 0
+            const origCurrency = block.original_currency || block.currency || 'USD'
+
+            // Valores negociados (do item do pedido)
+            const negNetL = Number(item.net_l) || 0
+            const negNetH = Number(item.net_h) || 0
+            const negNetW = Number(item.net_w) || 0
+            const negNetVol = Number(item.net_volume) || 0
+            const negPriceM3 = Number(item.price_m3) || 0
+            const negTotal = Number(item.total_value) || 0
+            const negCurrency = item.currency || 'USD'
+
+            // Detecta diferenças (qualquer diferença, mesmo pequena, é alertada)
+            const eq = (a, b) => Math.abs((a || 0) - (b || 0)) < 0.001
+            const diffNetL = !eq(origNetL, negNetL)
+            const diffNetH = !eq(origNetH, negNetH)
+            const diffNetW = !eq(origNetW, negNetW)
+            const diffNetVol = !eq(origNetVol, negNetVol)
+            const diffPriceM3 = !eq(origPriceM3, negPriceM3)
+            const diffTotal = !eq(origTotalValue, negTotal)
+            const diffCurrency = origCurrency !== negCurrency
+            const hasAnyDiff = diffNetL || diffNetH || diffNetW || diffNetVol || diffPriceM3 || diffTotal || diffCurrency
+
+            // Helper pra renderizar valor com cor de diferença
+            const colorFor = (orig, neg, lowerIsWorse) => {
+              if (eq(orig, neg)) return 'inherit'
+              if (lowerIsWorse) return neg < orig ? '#dc2626' : '#15803d'
+              return neg > orig ? '#dc2626' : '#15803d'
+            }
+
+            return (
+              <>
+                {/* Alerta de diferença */}
+                {hasAnyDiff && (
+                  <div style={{ background: '#fee2e2', border: '2px solid #dc2626', padding: 10, borderRadius: 8, marginBottom: 12, color: '#991b1b' }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>⚠️ Valores divergem dos cadastrados na pedreira!</div>
+                    <div style={{ fontSize: 11 }}>Compare abaixo e avalie se aprova ou rejeita o pedido.</div>
+                  </div>
+                )}
+
+                {/* Comparativo lado a lado: cadastrado vs negociado */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                  {/* CADASTRADO NA PEDREIRA */}
+                  <div style={{ background: '#eff6ff', padding: 10, borderRadius: 6, border: '1px solid #bfdbfe' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 6 }}>📋 Cadastrado (pedreira)</div>
+                    <div style={{ fontSize: 11, color: '#1e40af', marginBottom: 2 }}>Medidas líquidas:</div>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>{origNetL.toFixed(2)} × {origNetH.toFixed(2)} × {origNetW.toFixed(2)} m</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#1d4ed8' }}>Vol líquido: {origNetVol.toFixed(2)} m³</div>
+                    <div style={{ borderTop: '1px solid #bfdbfe', marginTop: 6, paddingTop: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                        <span>Preço m³:</span><strong>{money(origPriceM3, origCurrency)}</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, marginTop: 2 }}>
+                        <span>Total:</span><strong style={{ color: '#1d4ed8' }}>{money(origTotalValue, origCurrency)}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* NEGOCIADO (do pedido) */}
+                  <div style={{ background: hasAnyDiff ? '#fef3c7' : '#dcfce7', padding: 10, borderRadius: 6, border: hasAnyDiff ? '1px solid #f59e0b' : '1px solid #15803d' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: hasAnyDiff ? '#854d0e' : '#15803d', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 6 }}>💼 Negociado (pedido)</div>
+                    <div style={{ fontSize: 11, color: hasAnyDiff ? '#854d0e' : '#15803d', marginBottom: 2 }}>Medidas líquidas:</div>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>
+                      <span style={{ color: diffNetL ? colorFor(origNetL, negNetL, true) : 'inherit' }}>{negNetL.toFixed(2)}</span>
+                      {' × '}
+                      <span style={{ color: diffNetH ? colorFor(origNetH, negNetH, true) : 'inherit' }}>{negNetH.toFixed(2)}</span>
+                      {' × '}
+                      <span style={{ color: diffNetW ? colorFor(origNetW, negNetW, true) : 'inherit' }}>{negNetW.toFixed(2)}</span>
+                      {' m'}
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: diffNetVol ? colorFor(origNetVol, negNetVol, true) : (hasAnyDiff ? '#854d0e' : '#15803d') }}>
+                      Vol líquido: {negNetVol.toFixed(2)} m³
+                      {diffNetVol && origNetVol > 0 && (
+                        <span style={{ fontSize: 10, marginLeft: 6, fontWeight: 600 }}>
+                          ({negNetVol > origNetVol ? '+' : ''}{(negNetVol - origNetVol).toFixed(2)})
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ borderTop: '1px solid', borderColor: hasAnyDiff ? '#f59e0b' : '#15803d', marginTop: 6, paddingTop: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                        <span>Preço m³:</span>
+                        <strong style={{ color: diffPriceM3 ? colorFor(origPriceM3, negPriceM3, false) : 'inherit' }}>
+                          {money(negPriceM3, negCurrency)}
+                          {diffPriceM3 && origPriceM3 > 0 && (
+                            <span style={{ fontSize: 10, marginLeft: 4, fontWeight: 600 }}>
+                              ({negPriceM3 > origPriceM3 ? '+' : ''}{((negPriceM3 - origPriceM3) / origPriceM3 * 100).toFixed(1)}%)
+                            </span>
+                          )}
+                        </strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, marginTop: 2 }}>
+                        <span>Total:</span>
+                        <strong style={{ color: diffTotal ? colorFor(origTotalValue, negTotal, false) : (hasAnyDiff ? '#854d0e' : '#15803d') }}>
+                          {money(negTotal, negCurrency)}
+                          {diffTotal && origTotalValue > 0 && (
+                            <span style={{ fontSize: 10, marginLeft: 4, fontWeight: 600 }}>
+                              ({negTotal > origTotalValue ? '+' : ''}{money(negTotal - origTotalValue, negCurrency)})
+                            </span>
+                          )}
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )
+          })()}
+
           {/* Medidas */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
             {(item.gross_l || item.gross_volume) && (
@@ -10059,6 +10242,7 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
   const externalBlocks = buyerData?.externalBlocks || []
   const team = buyerData?.team || []
   const externalQuarries = buyerData?.externalQuarries || []
+  const purchaseOrders = buyerData?.purchaseOrders || []
 
   const [filterPeriod, setFilterPeriod] = useState('all')
   const [dtInicio, setDtInicio] = useState('')
@@ -10066,16 +10250,21 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
   const [filterMarker, setFilterMarker] = useState('')
   const [filterQuarry, setFilterQuarry] = useState('')
   const [filterMaterial, setFilterMaterial] = useState('')
+  const [filterStatus, setFilterStatus] = useState('all') // all | confirmed | pending
   const [search, setSearch] = useState('')
   const [originalBlocks, setOriginalBlocks] = useState({})
-  const [detail, setDetail] = useState(null) // bloco selecionado pra ver detalhes
+  const [detail, setDetail] = useState(null)
 
-  // Só inspeções que pertencem a compras finalizadas
+  // Inspeções que contam: já finalizadas (purchases) OU com pedido pendente (purchaseOrders.status='pending')
   const finalizedInspectionIds = new Set(purchases.map(p => p.inspection_id))
+  const pendingInspectionIds = new Set(
+    purchaseOrders.filter(po => po.status === 'pending').map(po => po.inspection_id)
+  )
+  const relevantInspectionIds = new Set([...finalizedInspectionIds, ...pendingInspectionIds])
 
   // Carrega blocos originais das inspeções
   useEffect(() => {
-    const relevantInsp = inspections.filter(i => finalizedInspectionIds.has(i.inspection_id))
+    const relevantInsp = inspections.filter(i => relevantInspectionIds.has(i.inspection_id))
     const ids = [...new Set(relevantInsp.map(i => i.original_block_id))]
     if (ids.length === 0) return
     ;(async () => {
@@ -10094,16 +10283,19 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
       }
       setOriginalBlocks(map)
     })()
-  }, [inspections.length, purchases.length])
+  }, [inspections.length, purchases.length, purchaseOrders.length])
 
   // Monta lista unificada de blocos comprados
   const items = []
-  inspections.filter(i => finalizedInspectionIds.has(i.inspection_id)).forEach(i => {
+  inspections.filter(i => relevantInspectionIds.has(i.inspection_id)).forEach(i => {
     const orig = originalBlocks[i.original_block_id]
     const purchase = purchases.find(p => p.inspection_id === i.inspection_id)
+    const order = purchaseOrders.find(po => po.inspection_id === i.inspection_id)
     const visit = visits.find(v => v.id === i.inspection_id)
     const quarry = visit ? externalQuarries.find(q => q.id === visit.external_quarry_id) : null
     const marker = visit ? team.find(m => m.id === visit.marker_id) : null
+    const isPending = !purchase && order?.status === 'pending'
+
     items.push({
       type: 'inspection',
       id: i.id,
@@ -10119,18 +10311,22 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
       quarry_id: visit?.external_quarry_id,
       marker_id: visit?.marker_id,
       marker_name: marker?.name || '—',
-      date: purchase?.created_at,
+      date: purchase?.created_at || order?.created_at,
       purchase,
+      order,
       visit,
       original: orig,
       inspection: i,
+      isPending,
     })
   })
-  externalBlocks.filter(b => finalizedInspectionIds.has(b.inspection_id)).forEach(b => {
+  externalBlocks.filter(b => relevantInspectionIds.has(b.inspection_id)).forEach(b => {
     const purchase = purchases.find(p => p.inspection_id === b.inspection_id)
+    const order = purchaseOrders.find(po => po.inspection_id === b.inspection_id)
     const visit = visits.find(v => v.id === b.inspection_id)
     const quarry = externalQuarries.find(q => q.id === b.external_quarry_id)
     const marker = visit ? team.find(m => m.id === visit.marker_id) : null
+    const isPending = !purchase && order?.status === 'pending'
     items.push({
       type: 'external',
       id: b.id,
@@ -10146,10 +10342,12 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
       quarry_id: b.external_quarry_id,
       marker_id: visit?.marker_id,
       marker_name: marker?.name || '—',
-      date: purchase?.created_at,
+      date: purchase?.created_at || order?.created_at,
       purchase,
+      order,
       visit,
       block: b,
+      isPending,
     })
   })
 
@@ -10172,6 +10370,8 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
   }
 
   const filtered = items.filter(it => {
+    if (filterStatus === 'confirmed' && it.isPending) return false
+    if (filterStatus === 'pending' && !it.isPending) return false
     if (!matchesPeriod(it.date)) return false
     if (filterMarker && it.marker_id !== filterMarker) return false
     if (filterQuarry && it.quarry_id !== filterQuarry) return false
@@ -10181,7 +10381,10 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
   })
 
   const allMaterials = [...new Set(items.map(it => it.material).filter(Boolean))].sort()
-  const hasFilter = filterPeriod !== 'all' || filterMarker || filterQuarry || filterMaterial || search || dtInicio || dtFim
+  const hasFilter = filterPeriod !== 'all' || filterMarker || filterQuarry || filterMaterial || search || dtInicio || dtFim || filterStatus !== 'all'
+
+  const pendingCount = items.filter(it => it.isPending).length
+  const confirmedCount = items.filter(it => !it.isPending).length
 
   // Totais
   let totalUSD = 0, totalBRL = 0
@@ -10219,6 +10422,21 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
         </div>
       )}
 
+      {/* Tabs de status */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+        {[
+          { v: 'all',       l: `Todos (${items.length})` },
+          { v: 'confirmed', l: `✓ Confirmados (${confirmedCount})` },
+          { v: 'pending',   l: `⏳ Aguardando (${pendingCount})` },
+        ].map(t => (
+          <button key={t.v}
+            className={'btn bsm ' + (filterStatus === t.v ? 'bb' : 'bo')}
+            onClick={() => setFilterStatus(t.v)}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
       {/* Filtros */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="cb" style={{ padding: '12px 14px' }}>
@@ -10251,7 +10469,7 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
               {allMaterials.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
             {hasFilter && (
-              <button className="btn bo bsm" onClick={() => { setFilterPeriod('all'); setFilterMarker(''); setFilterQuarry(''); setFilterMaterial(''); setSearch(''); setDtInicio(''); setDtFim('') }}>
+              <button className="btn bo bsm" onClick={() => { setFilterPeriod('all'); setFilterMarker(''); setFilterQuarry(''); setFilterMaterial(''); setSearch(''); setDtInicio(''); setDtFim(''); setFilterStatus('all') }}>
                 <Icon n="x" s={13} /> Limpar
               </button>
             )}
@@ -10271,12 +10489,25 @@ function IndBoughtBlocksPage({ profile, buyerData, onChange, toast }) {
               {it.photo ? (
                 <div style={{ position: 'relative' }}>
                   <img src={it.photo} alt={it.code} style={{ width: '100%', height: 180, objectFit: 'cover', display: 'block' }} />
-                  <div style={{ position: 'absolute', top: 8, left: 8, background: '#10b981', color: '#fff', padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
-                    ✓ COMPRADO
-                  </div>
+                  {it.isPending ? (
+                    <div style={{ position: 'absolute', top: 8, left: 8, background: '#f59e0b', color: '#fff', padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
+                      ⏳ AGUARDANDO APROVAÇÃO
+                    </div>
+                  ) : (
+                    <div style={{ position: 'absolute', top: 8, left: 8, background: '#10b981', color: '#fff', padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
+                      ✓ COMPRADO
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div style={{ height: 160, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon n="cube" s={32} c="var(--mist)" /></div>
+                <div style={{ height: 160, background: 'var(--haze)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                  <Icon n="cube" s={32} c="var(--mist)" />
+                  {it.isPending && (
+                    <div style={{ position: 'absolute', top: 8, left: 8, background: '#f59e0b', color: '#fff', padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
+                      ⏳ AGUARDANDO
+                    </div>
+                  )}
+                </div>
               )}
               <div className="cb">
                 <div style={{ fontFamily: 'Sora,sans-serif', fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{it.code}</div>

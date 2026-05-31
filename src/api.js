@@ -1,3 +1,4 @@
+// Stone Block Etapa 11 - 2026-05-31 18:55
 // src/api.js
 // ═══════════════════════════════════════════════════════════════
 // Stone Block — camada de API para o Supabase
@@ -573,7 +574,24 @@ export async function listBlockReleases(profile) {
     `)
     .eq('company_id', companyId)
   if (error) throw error
-  return data || []
+
+  // Filtra liberações expiradas
+  const now = new Date().toISOString()
+  const active = (data || []).filter(r => !r.valid_until || r.valid_until >= now)
+
+  // Enriquece releases que tem buyer_company_id (sistema novo) com o nome da indústria
+  const buyerIds = [...new Set(active.filter(r => r.buyer_company_id && !r.client).map(r => r.buyer_company_id))]
+  if (buyerIds.length > 0) {
+    const { data: bcs } = await supabase.from('buyer_companies').select('id, name').in('id', buyerIds)
+    const map = {}
+    for (const b of (bcs || [])) map[b.id] = b
+    for (const r of active) {
+      if (r.buyer_company_id && map[r.buyer_company_id]) {
+        r.buyer_company = map[r.buyer_company_id]
+      }
+    }
+  }
+  return active
 }
 
 export async function releaseBlocks(profile, blockIds, clientIds) {
@@ -596,13 +614,51 @@ export async function releaseBlocks(profile, blockIds, clientIds) {
   if (error) throw error
 }
 
-export async function revokeRelease(blockId, clientId) {
+// Revoga uma liberação. Aceita id da release diretamente OU block_id+client_id (legado).
+// Se a release tinha request_id (veio de uma solicitação respondida), marca a solicitação como 'unavailable'.
+export async function revokeRelease(releaseIdOrBlockId, clientId) {
+  // Modo 1: passou um único arg que é o ID da release (preferido)
+  if (clientId === undefined) {
+    const releaseId = releaseIdOrBlockId
+    // Carrega pra checar se tem request_id
+    const { data: rel } = await supabase
+      .from('block_releases').select('id, request_id')
+      .eq('id', releaseId).maybeSingle()
+    const { error } = await supabase.from('block_releases').delete().eq('id', releaseId)
+    if (error) throw error
+    // Se veio de solicitação, marca solicitação como 'unavailable'
+    if (rel?.request_id) {
+      await supabase.from('catalog_requests').update({
+        status: 'unavailable',
+      }).eq('id', rel.request_id)
+    }
+    return
+  }
+  // Modo 2 (legado): block_id + client_id (sistema antigo)
   const { error } = await supabase
     .from('block_releases')
     .delete()
-    .eq('block_id', blockId)
+    .eq('block_id', releaseIdOrBlockId)
     .eq('client_id', clientId)
   if (error) throw error
+}
+
+// Lista TODAS as liberações da pedreira (legadas + novas direct buyer)
+// Retorna objetos enriquecidos pra exibir e revogar
+export async function listAllReleasesForQuarry(profile) {
+  const companyId = profile.role === 'owner' ? profile.id : (profile.company_id || profile.id)
+  const now = new Date().toISOString()
+
+  const { data, error } = await supabase
+    .from('block_releases')
+    .select('id, block_id, client_id, buyer_company_id, valid_until, message, request_id, data_liberacao')
+    .eq('company_id', companyId)
+    .order('data_liberacao', { ascending: false })
+  if (error) throw error
+
+  // Filtra expiradas (apenas pra exibição se tiver valid_until passado)
+  const active = (data || []).filter(r => !r.valid_until || r.valid_until >= now)
+  return active
 }
 
 // ─── CATALOG (blocos liberados para o cliente logado) ───────────
@@ -3111,6 +3167,32 @@ export async function cancelCatalogRequest(profile, requestId) {
   await supabase.from('catalog_requests').update({
     status: 'cancelled',
   }).eq('id', requestId)
+}
+
+// Pedreira rejeita formalmente uma solicitação (não responde com blocos)
+// reason: opcional
+export async function rejectCatalogRequest(profile, requestId, reason) {
+  const { data: req, error: e1 } = await supabase
+    .from('catalog_requests').select('*').eq('id', requestId).single()
+  if (e1) throw e1
+  if (req.status !== 'pending') throw new Error('Solicitação já não está pendente.')
+
+  await supabase.from('catalog_requests').update({
+    status: 'rejected',
+    reply_message: reason || null,
+    replied_at: new Date().toISOString(),
+    replied_by: profile.id,
+  }).eq('id', requestId)
+
+  // Notifica equipe da indústria
+  const { data: quarryProfile } = await supabase
+    .from('profiles').select('name').eq('id', req.quarry_company_id).single()
+  const { data: buyerTeam } = await supabase
+    .from('profiles').select('id').eq('buyer_company_id', req.buyer_company_id)
+  for (const t of (buyerTeam || [])) {
+    await createIndNotification(t.id, '❌ Solicitação rejeitada',
+      `${quarryProfile?.name || 'A pedreira'} rejeitou sua solicitação${reason ? ': ' + reason.slice(0, 80) : '.'}`)
+  }
 }
 
 // Atualiza a função listIndQuarryCatalog para incluir o sistema novo (buyer_company_id direto + valid_until)
